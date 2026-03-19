@@ -1,0 +1,34 @@
+name: graduated-only
+description: Conservative strategy - only trade tokens that graduated from bonding curve to DEX
+
+entry:
+  conditions:
+    - bondingCurveProgress >= 100
+    - holders >= 100
+    - volume24h >= 50000
+    - score >= 70
+  buy:
+    amount_sol: 0.2
+    slippage_bps: 1000
+    priority_fee_sol: 0.003
+
+exit:
+  take_profit:
+    - at: 1.5
+      sell_percent: 25
+    - at: 2.0
+      sell_percent: 25
+    - at: 3.0
+      sell_percent: 25
+    - at: 5.0
+      sell_percent: 100
+  stop_loss_percent: 25
+  timeout_minutes: 480
+  timeout_action: hold
+
+filters:
+  min_score: 70
+  blacklist_patterns:
+    - "test"
+    - "scam"
+    - "rug"

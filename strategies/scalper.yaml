@@ -1,0 +1,27 @@
+name: scalper
+description: Ultra-fast scalping strategy for quick 20-50% flips on momentum
+
+entry:
+  conditions:
+    - bondingCurveProgress >= 5
+    - bondingCurveProgress <= 50
+    - holders >= 10
+    - priceChange5m >= 10
+    - volume24h >= 5000
+  buy:
+    amount_sol: 0.05
+    slippage_bps: 2500
+    priority_fee_sol: 0.015
+
+exit:
+  take_profit:
+    - at: 1.2
+      sell_percent: 50
+    - at: 1.5
+      sell_percent: 100
+  stop_loss_percent: 20
+  timeout_minutes: 10
+  timeout_action: sell
+
+filters:
+  min_score: 40

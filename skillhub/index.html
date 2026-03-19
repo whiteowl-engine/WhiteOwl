@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SkillHub — Marketplace</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 980 980'><rect width='980' height='980' rx='306' fill='%23507b9e'/><path fill='white' d='M520.49 770.42C511.57 779.26 501.15 790.01 497.34 794.29L490.40 802.08L479.53 789.99C456.92 764.85 435.43 745.51 369.50 690.97C314.17 645.21 286.01 614.80 271.53 585.21C263.43 568.65 259.50 556.38 257.03 540C255.57 530.29 255.58 506.39 257.05 499.15C262.28 473.32 264.54 465.28 271.64 447.25L276.07 435.99L260.75 420.75C244.18 404.27 233.14 391.10 222.79 375.45C216.57 366.05 207.90 350.11 205.40 343.50C200.33 330.04 198.73 325.03 196.44 315.46C193.20 301.84 192.18 282.18 193.94 267.06C195.04 257.67 199.80 239.89 203.48 231.50C208.13 220.86 209.59 217.87 212.75 212.50C218.83 202.16 224.71 193.71 231.22 185.97L237.50 178.50L237.83 181.92C238.01 183.80 237.67 187.26 237.08 189.61C233.79 202.66 237.78 237.62 245.01 259.04C258.19 298.14 280.33 331.09 336.94 395.89C363.42 426.20 374.94 439.63 385.10 452.03C433.84 511.54 456.87 556.85 464.43 608.13C466.06 619.14 466.59 643.52 465.22 644.36C464.80 644.63 461.77 643.42 458.49 641.67L452.54 638.50L448.11 627.50C432.55 588.93 409.38 553.13 378.24 519.55C367.38 507.83 346.95 488.83 335.75 480.02C333.63 478.35 330 477.25 330 478.27C330 478.42 328.65 483.93 326.99 490.52C315.12 537.85 325.34 573.95 361.58 612.76C372.63 624.60 402.50 651.06 429.38 672.83C447.82 687.77 473.24 713.42 484.78 728.75C487.79 732.74 490.36 736 490.50 736C490.64 736 493.21 732.74 496.22 728.75C511.01 709.11 529.34 691.47 573 654.87C629.97 607.12 649.75 581.27 656.49 545.75C659.36 530.60 657.60 499.09 653.42 490.88C652.68 489.43 652.29 488.05 652.54 487.80C653.10 487.23 650.12 477 649.39 477C648 477 625.13 497.10 613.99 508.13C585.72 536.09 563.99 564.75 547.28 596.12C541.43 607.09 531.18 629.73 528.67 637.21C528.02 639.13 516.16 645.50 515.15 644.48C514 643.31 515 616.82 516.60 606C523.69 558.17 545.45 514.78 590.56 458.50C601.41 444.97 608.70 436.43 649.54 389.42C660.01 377.36 671.26 364.12 674.54 360C677.81 355.88 680.75 352.27 681.08 352C683.34 350.07 701.86 324.31 708.71 313.59C724.08 289.51 733.31 269.27 738.86 247.50C744.41 225.74 745.66 212.68 744.02 193.63C743.40 186.55 743.19 180.48 743.55 180.13C745.35 178.36 764.31 204.63 771.25 218.50C783.79 243.57 789.07 269.54 786.95 295.66C783.40 339.11 761.78 379.53 719.79 421.17C711.66 429.23 705 436.22 705 436.70C705 437.17 706.51 441.15 708.36 445.53C721.45 476.59 727.65 513.82 723.94 539.23C720.16 565.18 709.54 589.19 690.88 614.02C673.71 636.89 651.50 657.94 597.50 702.55C558.12 735.09 540.19 750.89 520.49 770.42Z'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+:root{
+  --bg:#f4f6f8;--bg2:#eef1f4;--bg3:#e2e6ec;
+  --surface:#ffffff;--card-bg:#ffffff;--surface2:#f8f9fa;--surface3:#f0f2f5;
+  --border:rgba(20,40,80,.05);--border2:rgba(20,40,80,.08);--border3:rgba(20,40,80,.12);
+  --text:#333333;--text2:#495057;--muted:#868e96;--muted2:#adb5bd;
+  --fg:var(--text);--card:var(--surface);
+  --primary:#507b9e;--primary2:#3e6382;--primary3:#2c4b66;--primary-soft:rgba(80,123,158,.12);
+  --green:#38a169;--green2:#2f855a;--green-soft:#E6F4EA;
+  --red:#e53e3e;--red2:#c53030;--red-soft:#FCE8E6;
+  --yellow:#d69e2e;--yellow-soft:rgba(214,158,46,.12);
+  --purple:#805ad5;--purple-soft:rgba(128,90,213,.12);
+  --cyan:#319795;--cyan-soft:rgba(49,151,149,.12);
+  --orange:#dd6b20;
+  --radius:16px;--radius-lg:24px;
+  --shadow-sm:0 2px 8px rgba(100,110,120,.03);
+  --shadow:0 8px 24px rgba(100,110,120,.08);
+  --shadow-lg:0 12px 32px rgba(100,110,120,.12);
+  --shadow-xl:0 20px 48px rgba(100,110,120,.15);
+  --transition:all .2s ease;
+}
+
+html{font-size:15px}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;min-height:100vh}
+a{color:var(--primary);text-decoration:none;transition:var(--transition)}
+a:hover{color:var(--primary2)}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(20,40,80,.10);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.15)}
+
+/* ─── Components ─── */
+input,textarea,select{background:var(--surface2);color:var(--text);border:1.5px solid var(--border2);border-radius:var(--radius);padding:11px 16px;font:inherit;font-size:.875rem;outline:none;transition:var(--transition);width:100%}
+input:focus,textarea:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 24px;border:none;border-radius:var(--radius);font:inherit;font-size:.8125rem;font-weight:600;cursor:pointer;transition:var(--transition);white-space:nowrap}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm);border:1px solid transparent}
+.btn-primary:hover{background:var(--primary2);box-shadow:var(--shadow)}
+.btn-ghost{background:var(--surface);color:var(--text2);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.btn-ghost:hover{background:var(--surface2);color:var(--text)}
+.btn-sm{padding:8px 18px;font-size:.8125rem;border-radius:20px}
+.btn-xs{padding:5px 14px;font-size:.75rem;border-radius:10px}
+
+.badge{display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;font-size:.7rem;font-weight:600}
+.badge-green{background:var(--green-soft);color:var(--green)}
+.badge-red{background:var(--red-soft);color:var(--red)}
+.badge-blue{background:var(--primary-soft);color:var(--primary)}
+.badge-yellow{background:var(--yellow-soft);color:var(--yellow)}
+.badge-purple{background:var(--purple-soft);color:var(--purple)}
+.badge-cyan{background:var(--cyan-soft);color:var(--cyan)}
+
+/* ─── Cards ─── */
+.card{background:var(--surface);border:none;border-radius:var(--radius-lg);overflow:hidden;transition:var(--transition);box-shadow:var(--shadow-sm)}
+.card:hover{box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border)}
+.card-h h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.card-b{padding:20px 22px}
+
+/* ─── Layout ─── */
+.hub-topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;height:70px;display:flex;align-items:center;gap:20px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow-sm)}
+.hub-topbar .logo{display:flex;align-items:center;gap:12px;font-size:1.125rem;font-weight:800;letter-spacing:.5px;color:var(--text)}
+.hub-topbar .logo img{width:32px;height:32px;opacity:.85}
+.hub-topbar .logo .sub{font-size:.65rem;color:var(--muted);font-weight:500;letter-spacing:.3px}
+.hub-topbar-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+.hub-hero{padding:48px 32px 32px;text-align:center;position:relative;overflow:hidden}
+.hub-hero h1{font-size:2rem;font-weight:800;color:var(--text);margin-bottom:8px}
+.hub-hero p{font-size:1rem;color:var(--muted);max-width:560px;margin:0 auto}
+.hub-hero::after{content:'';position:absolute;top:-60px;right:-60px;width:300px;height:300px;background:radial-gradient(circle,var(--primary-soft) 0%,transparent 70%);pointer-events:none;z-index:0}
+
+.hub-container{max-width:1200px;margin:0 auto;padding:0 32px 48px}
+
+/* ─── Toolbar ─── */
+.hub-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:24px;padding:16px 0}
+.hub-search{position:relative;flex:1;min-width:200px;max-width:400px}
+.hub-search input{padding-left:38px;background:var(--surface);border:1.5px solid var(--border2);border-radius:14px}
+.hub-search svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted)}
+
+/* ─── Stats ─── */
+.hub-stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.hub-stat{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:20px 24px;flex:1;min-width:180px;box-shadow:var(--shadow-sm);transition:var(--transition)}
+.hub-stat:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
+.hub-stat .hs-label{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px}
+.hub-stat .hs-value{font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.2;color:var(--text)}
+.hub-stat .hs-sub{font-size:.75rem;color:var(--muted2);margin-top:4px}
+
+/* ─── Grid ─── */
+.hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+
+/* ─── Skill Card ─── */
+.skill-card{background:var(--surface);border:none;border-radius:var(--radius-lg);overflow:hidden;transition:var(--transition);box-shadow:var(--shadow-sm)}
+.skill-card:hover{box-shadow:var(--shadow)}
+.skill-card.expanded{box-shadow:0 4px 20px rgba(80,123,158,.12);outline:2px solid rgba(80,123,158,.15)}
+.skill-card-head{padding:16px 18px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;user-select:none;transition:var(--transition)}
+.skill-card-head:hover{background:var(--surface2)}
+.skill-card-info{flex:1;min-width:0}
+.skill-card-name{font-size:.875rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.skill-card-desc{font-size:.8125rem;color:var(--muted2);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.skill-card-meta{display:flex;gap:6px;flex-shrink:0;align-items:center}
+.skill-card-arrow{width:15px;height:15px;color:var(--muted);transition:transform .2s;flex-shrink:0}
+.skill-card.expanded .skill-card-arrow{transform:rotate(180deg);color:var(--primary)}
+.skill-card-body{display:none;border-top:1px solid var(--border);padding:0}
+.skill-card.expanded .skill-card-body{display:block}
+
+.skill-tool{padding:14px 18px;border-bottom:1px solid var(--border);font-size:.8125rem;transition:var(--transition)}
+.skill-tool:last-child{border-bottom:none}
+.skill-tool:hover{background:var(--surface2)}
+.skill-tool-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.skill-tool-name{font-weight:600;color:var(--primary);font-family:'JetBrains Mono',monospace;font-size:.8125rem}
+.skill-tool-risk{font-size:.6rem;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.skill-tool-risk.r-read{color:var(--green)}
+.skill-tool-risk.r-write{color:var(--yellow)}
+.skill-tool-risk.r-financial{color:var(--red)}
+.skill-tool-desc{color:var(--muted2);font-size:.8125rem;margin-top:4px;line-height:1.4}
+.skill-tool-params{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+.skill-tool-param{font-size:.675rem;padding:3px 10px;border-radius:8px;background:var(--primary-soft);color:var(--muted2);font-family:'JetBrains Mono',monospace}
+
+.skill-empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.skill-empty svg{width:48px;height:48px;margin-bottom:12px;opacity:.3}
+
+/* ─── Tabs ─── */
+.hub-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:24px}
+.hub-tab{padding:12px 24px;cursor:pointer;color:var(--muted);font-size:.8125rem;font-weight:500;border-bottom:2px solid transparent;transition:var(--transition);white-space:nowrap}
+.hub-tab:hover{color:var(--text)}
+.hub-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+
+/* ─── Connection Banner ─── */
+.conn-banner{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 22px;margin-bottom:24px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm)}
+.conn-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:var(--transition)}
+.conn-dot.connected{background:var(--green);box-shadow:0 0 8px rgba(56,161,105,.4)}
+.conn-dot.disconnected{background:var(--red);box-shadow:0 0 8px rgba(229,62,62,.4)}
+.conn-banner .conn-text{flex:1;font-size:.8125rem;color:var(--text2)}
+.conn-banner .conn-label{font-weight:600;color:var(--text);display:block;margin-bottom:2px;font-size:.875rem}
+
+/* ─── Modals ─── */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.4);align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+
+/* ─── Toast ─── */
+.toasts{position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:14px;font-size:.8125rem;font-weight:500;box-shadow:var(--shadow-lg);animation:toastIn .3s ease;transition:opacity .3s}
+.toast-success{background:var(--green);color:#fff}
+.toast-error{background:var(--red);color:#fff}
+.toast-info{background:var(--primary);color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+
+/* ─── Publish Form ─── */
+.publish-form{display:flex;flex-direction:column;gap:14px}
+.publish-form label{font-size:.75rem;color:var(--muted);font-weight:600}
+.publish-form input,.publish-form textarea{margin-top:4px}
+
+/* ─── Footer ─── */
+.hub-footer{text-align:center;padding:32px;font-size:.75rem;color:var(--muted);border-top:1px solid var(--border);margin-top:48px}
+
+/* ─── Background decoration ─── */
+body::after{
+  content:'';position:fixed;bottom:-20px;right:-20px;width:400px;height:400px;
+  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 980 980' fill='%23507b9e'><path d='M520.49 770.42C511.57 779.26 501.15 790.01 497.34 794.29L490.40 802.08L479.53 789.99C456.92 764.85 435.43 745.51 369.50 690.97C314.17 645.21 286.01 614.80 271.53 585.21C263.43 568.65 259.50 556.38 257.03 540C255.57 530.29 255.58 506.39 257.05 499.15C262.28 473.32 264.54 465.28 271.64 447.25L276.07 435.99L260.75 420.75C244.18 404.27 233.14 391.10 222.79 375.45C216.57 366.05 207.90 350.11 205.40 343.50C200.33 330.04 198.73 325.03 196.44 315.46C193.20 301.84 192.18 282.18 193.94 267.06C195.04 257.67 199.80 239.89 203.48 231.50C208.13 220.86 209.59 217.87 212.75 212.50C218.83 202.16 224.71 193.71 231.22 185.97L237.50 178.50L237.83 181.92C238.01 183.80 237.67 187.26 237.08 189.61C233.79 202.66 237.78 237.62 245.01 259.04C258.19 298.14 280.33 331.09 336.94 395.89C363.42 426.20 374.94 439.63 385.10 452.03C433.84 511.54 456.87 556.85 464.43 608.13C466.06 619.14 466.59 643.52 465.22 644.36C464.80 644.63 461.77 643.42 458.49 641.67L452.54 638.50L448.11 627.50C432.55 588.93 409.38 553.13 378.24 519.55C367.38 507.83 346.95 488.83 335.75 480.02C333.63 478.35 330 477.25 330 478.27C330 478.42 328.65 483.93 326.99 490.52C315.12 537.85 325.34 573.95 361.58 612.76C372.63 624.60 402.50 651.06 429.38 672.83C447.82 687.77 473.24 713.42 484.78 728.75C487.79 732.74 490.36 736 490.50 736C490.64 736 493.21 732.74 496.22 728.75C511.01 709.11 529.34 691.47 573 654.87C629.97 607.12 649.75 581.27 656.49 545.75C659.36 530.60 657.60 499.09 653.42 490.88C652.68 489.43 652.29 488.05 652.54 487.80C653.10 487.23 650.12 477 649.39 477C648 477 625.13 497.10 613.99 508.13C585.72 536.09 563.99 564.75 547.28 596.12C541.43 607.09 531.18 629.73 528.67 637.21C528.02 639.13 516.16 645.50 515.15 644.48C514 643.31 515 616.82 516.60 606C523.69 558.17 545.45 514.78 590.56 458.50C601.41 444.97 608.70 436.43 649.54 389.42C660.01 377.36 671.26 364.12 674.54 360C677.81 355.88 680.75 352.27 681.08 352C683.34 350.07 701.86 324.31 708.71 313.59C724.08 289.51 733.31 269.27 738.86 247.50C744.41 225.74 745.66 212.68 744.02 193.63C743.40 186.55 743.19 180.48 743.55 180.13C745.35 178.36 764.31 204.63 771.25 218.50C783.79 243.57 789.07 269.54 786.95 295.66C783.40 339.11 761.78 379.53 719.79 421.17C711.66 429.23 705 436.22 705 436.70C705 437.17 706.51 441.15 708.36 445.53C721.45 476.59 727.65 513.82 723.94 539.23C720.16 565.18 709.54 589.19 690.88 614.02C673.71 636.89 651.50 657.94 597.50 702.55C558.12 735.09 540.19 750.89 520.49 770.42Z'/></svg>") no-repeat center/contain;
+  opacity:.04;pointer-events:none;z-index:-1;transform:rotate(-20deg);
+}
+
+/* ─── Responsive ─── */
+@media(max-width:768px){
+  .hub-topbar{padding:0 16px}
+  .hub-hero{padding:32px 16px 24px}
+  .hub-hero h1{font-size:1.5rem}
+  .hub-container{padding:0 16px 32px}
+  .hub-stats{flex-direction:column}
+  .hub-grid{grid-template-columns:1fr}
+  .hub-toolbar{flex-direction:column;align-items:stretch}
+  .hub-search{max-width:100%}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ Toasts ═══ -->
+<div class="toasts" id="toasts"></div>
+
+<!-- ═══ Top Bar ═══ -->
+<div class="hub-topbar">
+  <div class="logo">
+    <svg viewBox="0 0 980 980" fill="none" style="width:28px;height:28px"><rect width="980" height="980" rx="306" fill="var(--primary)"/><path fill="#fff" d="M520.49 770.42C511.57 779.26 501.15 790.01 497.34 794.29L490.40 802.08L479.53 789.99C456.92 764.85 435.43 745.51 369.50 690.97C314.17 645.21 286.01 614.80 271.53 585.21C263.43 568.65 259.50 556.38 257.03 540C255.57 530.29 255.58 506.39 257.05 499.15C262.28 473.32 264.54 465.28 271.64 447.25L276.07 435.99L260.75 420.75C244.18 404.27 233.14 391.10 222.79 375.45C216.57 366.05 207.90 350.11 205.40 343.50C200.33 330.04 198.73 325.03 196.44 315.46C193.20 301.84 192.18 282.18 193.94 267.06C195.04 257.67 199.80 239.89 203.48 231.50C208.13 220.86 209.59 217.87 212.75 212.50C218.83 202.16 224.71 193.71 231.22 185.97L237.50 178.50L237.83 181.92C238.01 183.80 237.67 187.26 237.08 189.61C233.79 202.66 237.78 237.62 245.01 259.04C258.19 298.14 280.33 331.09 336.94 395.89C363.42 426.20 374.94 439.63 385.10 452.03C433.84 511.54 456.87 556.85 464.43 608.13C466.06 619.14 466.59 643.52 465.22 644.36C464.80 644.63 461.77 643.42 458.49 641.67L452.54 638.50L448.11 627.50C432.55 588.93 409.38 553.13 378.24 519.55C367.38 507.83 346.95 488.83 335.75 480.02C333.63 478.35 330 477.25 330 478.27C330 478.42 328.65 483.93 326.99 490.52C315.12 537.85 325.34 573.95 361.58 612.76C372.63 624.60 402.50 651.06 429.38 672.83C447.82 687.77 473.24 713.42 484.78 728.75C487.79 732.74 490.36 736 490.50 736C490.64 736 493.21 732.74 496.22 728.75C511.01 709.11 529.34 691.47 573 654.87C629.97 607.12 649.75 581.27 656.49 545.75C659.36 530.60 657.60 499.09 653.42 490.88C652.68 489.43 652.29 488.05 652.54 487.80C653.10 487.23 650.12 477 649.39 477C648 477 625.13 497.10 613.99 508.13C585.72 536.09 563.99 564.75 547.28 596.12C541.43 607.09 531.18 629.73 528.67 637.21C528.02 639.13 516.16 645.50 515.15 644.48C514 643.31 515 616.82 516.60 606C523.69 558.17 545.45 514.78 590.56 458.50C601.41 444.97 608.70 436.43 649.54 389.42C660.01 377.36 671.26 364.12 674.54 360C677.81 355.88 680.75 352.27 681.08 352C683.34 350.07 701.86 324.31 708.71 313.59C724.08 289.51 733.31 269.27 738.86 247.50C744.41 225.74 745.66 212.68 744.02 193.63C743.40 186.55 743.19 180.48 743.55 180.13C745.35 178.36 764.31 204.63 771.25 218.50C783.79 243.57 789.07 269.54 786.95 295.66C783.40 339.11 761.78 379.53 719.79 421.17C711.66 429.23 705 436.22 705 436.70C705 437.17 706.51 441.15 708.36 445.53C721.45 476.59 727.65 513.82 723.94 539.23C720.16 565.18 709.54 589.19 690.88 614.02C673.71 636.89 651.50 657.94 597.50 702.55C558.12 735.09 540.19 750.89 520.49 770.42Z"/></svg>
+    <div>
+      <div>SkillHub</div>
+      <div class="sub">Skill Marketplace</div>
+    </div>
+  </div>
+  <div class="hub-topbar-actions">
+    <span class="badge badge-yellow" id="totalBadge">0 packages</span>
+    <button class="btn btn-sm btn-ghost" onclick="refreshAll()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg>
+      Refresh
+    </button>
+    <button class="btn btn-sm" style="background:var(--cyan);color:#000" onclick="showPublish()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Publish Skill
+    </button>
+    <button class="btn btn-sm" style="background:var(--yellow);color:#000" onclick="showImport()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Import .axiom-skill
+    </button>
+  </div>
+</div>
+
+<!-- ═══ Hero ═══ -->
+<div class="hub-hero">
+  <h1>Skill Marketplace</h1>
+  <p>Browse, publish, and install skills for your local Axiom panel. Connect your instance to sync skills between environments.</p>
+</div>
+
+<!-- ═══ Main Container ═══ -->
+<div class="hub-container">
+
+  <!-- Connection Banner -->
+  <div class="conn-banner" id="connBanner">
+    <div class="conn-dot disconnected" id="connDot"></div>
+    <div class="conn-text">
+      <span class="conn-label" id="connLabel">Panel Not Connected</span>
+      <span id="connDesc">Enter your panel URL to sync skills with your local instance.</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+      <input type="text" id="panelUrl" placeholder="http://localhost:3000" style="width:220px;padding:8px 14px;font-size:.8125rem;border-radius:10px">
+      <button class="btn btn-sm btn-primary" onclick="connectPanel()">Connect</button>
+    </div>
+  </div>
+
+  <!-- Stats Row -->
+  <div class="hub-stats">
+    <div class="hub-stat">
+      <div class="hs-label">Total Packages</div>
+      <div class="hs-value" id="statTotal">0</div>
+      <div class="hs-sub">in hub registry</div>
+    </div>
+    <div class="hub-stat">
+      <div class="hs-label">Installed</div>
+      <div class="hs-value" id="statInstalled" style="color:var(--green)">0</div>
+      <div class="hs-sub">on connected panel</div>
+    </div>
+    <div class="hub-stat">
+      <div class="hs-label">Available</div>
+      <div class="hs-value" id="statAvailable" style="color:var(--primary)">0</div>
+      <div class="hs-sub">ready to install</div>
+    </div>
+    <div class="hub-stat">
+      <div class="hs-label">Total Tools</div>
+      <div class="hs-value" id="statTools" style="color:var(--cyan)">0</div>
+      <div class="hs-sub">across all packages</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="hub-tabs">
+    <div class="hub-tab active" data-tab="browse" onclick="switchTab('browse')">Browse All</div>
+    <div class="hub-tab" data-tab="installed" onclick="switchTab('installed')">Installed</div>
+    <div class="hub-tab" data-tab="available" onclick="switchTab('available')">Available</div>
+    <div class="hub-tab" data-tab="my" onclick="switchTab('my')">My Skills</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="hub-toolbar">
+    <div class="hub-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="searchInput" placeholder="Search skills, tools, authors..." oninput="filterPackages()">
+    </div>
+    <select id="tagFilter" onchange="filterPackages()" style="width:auto;padding:8px 14px;font-size:.8125rem;border-radius:10px">
+      <option value="">All tags</option>
+    </select>
+    <select id="sortBy" onchange="filterPackages()" style="width:auto;padding:8px 14px;font-size:.8125rem;border-radius:10px">
+      <option value="name">Sort by name</option>
+      <option value="downloads">Most downloads</option>
+      <option value="rating">Top rated</option>
+      <option value="recent">Recently added</option>
+    </select>
+  </div>
+
+  <!-- Package Grid -->
+  <div class="hub-grid" id="hubGrid">
+    <div class="skill-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      <div>Connect your panel or publish a skill to get started.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Publish Modal ═══ -->
+<div class="modal-overlay" id="publishModal">
+  <div class="card" style="width:520px;max-width:90vw">
+    <div class="card-h"><h3>Publish Skill to Hub</h3><button class="btn-ghost btn-xs" onclick="hidePublish()">&times;</button></div>
+    <div class="card-b">
+      <div class="publish-form">
+        <div>
+          <label>Skill Name</label>
+          <input id="pubName" type="text" placeholder="my-awesome-skill">
+        </div>
+        <div>
+          <label>Author</label>
+          <input id="pubAuthor" type="text" placeholder="your-name">
+        </div>
+        <div>
+          <label>Tags (comma-separated)</label>
+          <input id="pubTags" type="text" placeholder="trading, analysis, sniper">
+        </div>
+        <div>
+          <label>Description / Readme</label>
+          <textarea id="pubReadme" rows="4" placeholder="What does this skill do? How to use it?" style="resize:vertical"></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="doPublish()" style="flex:1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Publish
+          </button>
+          <button class="btn btn-ghost" onclick="hidePublish()">Cancel</button>
+        </div>
+        <div id="pubResult" style="font-size:.8125rem;white-space:pre-wrap;max-height:120px;overflow-y:auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Import Modal ═══ -->
+<div class="modal-overlay" id="importModal">
+  <div class="card" style="width:480px;max-width:90vw">
+    <div class="card-h"><h3>Import Skill Package</h3><button class="btn-ghost btn-xs" onclick="hideImport()">&times;</button></div>
+    <div class="card-b">
+      <div class="publish-form">
+        <div>
+          <label>Package file path (.axiom-skill)</label>
+          <input id="importPath" type="text" placeholder="C:\path\to\skill.axiom-skill">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" style="background:var(--yellow);color:#000;flex:1" onclick="doImport()">Import Package</button>
+          <button class="btn btn-ghost" onclick="hideImport()">Cancel</button>
+        </div>
+        <div id="importResult" style="font-size:.8125rem;white-space:pre-wrap;max-height:200px;overflow-y:auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Inspect Modal ═══ -->
+<div class="modal-overlay" id="inspectModal">
+  <div class="card" style="width:600px;max-width:90vw">
+    <div class="card-h"><h3>Package Details</h3><button class="btn-ghost btn-xs" onclick="hideInspect()">&times;</button></div>
+    <div class="card-b" id="inspectBody" style="max-height:70vh;overflow-y:auto;font-size:.8125rem;line-height:1.6"></div>
+  </div>
+</div>
+
+<!-- ═══ Footer ═══ -->
+<div class="hub-footer">
+  SkillHub &mdash; Decentralized Skill Marketplace &mdash; <span id="footYear">2026</span>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// SkillHub — Standalone Marketplace
+// ═══════════════════════════════════════════
+
+var $ = function(s) { return document.querySelector(s); };
+var $$ = function(s) { return document.querySelectorAll(s); };
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ─── Panel Connection ───
+var PANEL_URL = '';
+var AUTH_TOKEN = '';
+var panelConnected = false;
+var cachedEntries = [];
+var currentTab = 'browse';
+
+// Auto-connect: try saved URL or default localhost
+(function() {
+  var saved = localStorage.getItem('skillhub_panel_url');
+  if (saved) {
+    $('#panelUrl').value = saved;
+    connectPanel();
+  }
+})();
+
+function connectPanel() {
+  var url = ($('#panelUrl').value || '').trim().replace(/\/+$/, '');
+  if (!url) { toast('Enter panel URL', 'error'); return; }
+
+  // Validate URL format
+  try { new URL(url); } catch(e) { toast('Invalid URL', 'error'); return; }
+
+  PANEL_URL = url;
+  localStorage.setItem('skillhub_panel_url', url);
+
+  // Try to get auth token from localStorage (shared if same origin)
+  AUTH_TOKEN = localStorage.getItem('authToken') || '';
+
+  // Test connection via dedicated handshake endpoint
+  panelApi('/api/hub/connect').then(function(data) {
+    panelConnected = true;
+    $('#connDot').className = 'conn-dot connected';
+    $('#connLabel').textContent = 'Panel Connected';
+    $('#connDesc').textContent = 'Synced with ' + url + ' — ' + (data.skillCount || 0) + ' skills, ' + (data.hubPackages || 0) + ' packages';
+    toast('Connected to panel', 'success');
+    loadPackages();
+  }).catch(function() {
+    panelConnected = false;
+    $('#connDot').className = 'conn-dot disconnected';
+    $('#connLabel').textContent = 'Connection Failed';
+    $('#connDesc').textContent = 'Could not reach ' + url + '. Make sure the panel is running.';
+    toast('Cannot connect to panel', 'error');
+  });
+}
+
+function panelApi(endpoint, opts) {
+  opts = opts || {};
+  var headers = opts.headers || {};
+  if (AUTH_TOKEN) headers['Authorization'] = 'Bearer ' + AUTH_TOKEN;
+  if (!headers['Content-Type'] && opts.body) headers['Content-Type'] = 'application/json';
+
+  return fetch(PANEL_URL + endpoint, {
+    method: opts.method || 'GET',
+    headers: headers,
+    body: opts.body
+  }).then(function(r) {
+    if (!r.ok) return r.json().catch(function() { return { error: r.statusText }; }).then(function(e) { throw new Error(e.error || 'Request failed'); });
+    return r.json();
+  });
+}
+
+// ─── Load Packages ───
+function loadPackages() {
+  if (!panelConnected) return;
+  panelApi('/api/hub/browse').then(function(res) {
+    cachedEntries = res.entries || [];
+    updateStats();
+    populateTagFilter();
+    filterPackages();
+  }).catch(function(e) {
+    toast('Failed to load packages: ' + e.message, 'error');
+  });
+}
+
+function updateStats() {
+  var total = cachedEntries.length;
+  var installed = cachedEntries.filter(function(e) { return e.installed; }).length;
+  var available = total - installed;
+  var tools = cachedEntries.reduce(function(sum, e) { return sum + (e.toolCount || 0); }, 0);
+
+  $('#statTotal').textContent = total;
+  $('#statInstalled').textContent = installed;
+  $('#statAvailable').textContent = available;
+  $('#statTools').textContent = tools;
+  $('#totalBadge').textContent = total + ' packages';
+}
+
+function populateTagFilter() {
+  var tags = {};
+  cachedEntries.forEach(function(e) { (e.tags || []).forEach(function(t) { tags[t] = 1; }); });
+  var sel = $('#tagFilter');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">All tags</option>';
+  Object.keys(tags).sort().forEach(function(t) {
+    sel.innerHTML += '<option value="' + esc(t) + '">' + esc(t) + '</option>';
+  });
+  sel.value = cur;
+}
+
+// ─── Tab switching ───
+function switchTab(tab) {
+  currentTab = tab;
+  $$('.hub-tab').forEach(function(t) { t.classList.remove('active'); });
+  var el = document.querySelector('.hub-tab[data-tab="' + tab + '"]');
+  if (el) el.classList.add('active');
+  filterPackages();
+}
+
+// ─── Filter & Render ───
+function filterPackages() {
+  var q = ($('#searchInput').value || '').toLowerCase().trim();
+  var tag = $('#tagFilter').value;
+  var sort = $('#sortBy').value;
+
+  var filtered = cachedEntries.filter(function(e) {
+    // Tab filter
+    if (currentTab === 'installed' && !e.installed) return false;
+    if (currentTab === 'available' && e.installed) return false;
+    if (currentTab === 'my' && !e.isLocal) return false;
+
+    // Tag filter
+    if (tag && (e.tags || []).indexOf(tag) === -1) return false;
+
+    // Search
+    if (q) {
+      var hay = (e.name + ' ' + (e.description || '') + ' ' + (e.author || '') + ' ' + (e.tags || []).join(' ')).toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  // Sort
+  if (sort === 'downloads') filtered.sort(function(a, b) { return (b.downloads || 0) - (a.downloads || 0); });
+  else if (sort === 'rating') filtered.sort(function(a, b) { return (b.rating || 0) - (a.rating || 0); });
+  else if (sort === 'recent') filtered.sort(function(a, b) { return new Date(b.created || 0) - new Date(a.created || 0); });
+  else filtered.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+  renderGrid(filtered);
+}
+
+function renderGrid(entries) {
+  var grid = $('#hubGrid');
+  if (!entries.length) {
+    var msg = panelConnected ? 'No packages match your filters.' : 'Connect your panel to browse skills.';
+    grid.innerHTML = '<div class="skill-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg><div>' + msg + '</div></div>';
+    return;
+  }
+
+  var html = '';
+  entries.forEach(function(e) {
+    var instClass = e.installed ? 'badge-green' : 'badge-blue';
+    var instLabel = e.installed ? 'Installed' : 'Available';
+
+    html += '<div class="skill-card" id="pkg-' + esc(e.id) + '">';
+    html += '<div class="skill-card-head" onclick="toggleCard(this.parentElement)">';
+    html += '<div class="skill-card-info">';
+    html += '<div class="skill-card-name">' + esc(e.name);
+    html += ' <span class="badge badge-yellow" style="font-size:.6rem">v' + esc(e.version || '1.0') + '</span>';
+    html += ' <span class="badge ' + instClass + '" style="font-size:.6rem">' + instLabel + '</span>';
+    html += '</div>';
+    html += '<div class="skill-card-desc">' + esc(e.description || 'No description');
+    if (e.author) html += ' &middot; by <strong>' + esc(e.author) + '</strong>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="skill-card-meta">';
+    html += '<span class="badge badge-purple" title="Tools">' + (e.toolCount || 0) + ' tools</span>';
+    html += '<svg class="skill-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+    html += '</div></div>';
+
+    // Expanded body
+    html += '<div class="skill-card-body" style="padding:12px 16px">';
+
+    // Tags
+    if (e.tags && e.tags.length) {
+      html += '<div style="margin-bottom:8px">';
+      e.tags.forEach(function(t) { html += '<span class="badge badge-blue" style="font-size:.6rem;margin-right:4px">' + esc(t) + '</span>'; });
+      html += '</div>';
+    }
+
+    // Meta info
+    html += '<div style="display:flex;gap:16px;font-size:.75rem;color:var(--muted);margin-bottom:10px">';
+    if (e.rating) html += '<span>&#9733; ' + e.rating + '</span>';
+    html += '<span>' + (e.downloads || 0) + ' downloads</span>';
+    if (e.created) html += '<span>' + new Date(e.created).toLocaleDateString() + '</span>';
+    html += '</div>';
+
+    // Actions
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    html += '<button class="btn btn-sm" style="background:var(--cyan);color:#000;font-size:.75rem" onclick="event.stopPropagation();inspectPkg(\'' + esc(e.id) + '\')">Inspect</button>';
+    if (e.installed) {
+      html += '<button class="btn btn-sm" style="background:var(--red);color:#fff;font-size:.75rem" onclick="event.stopPropagation();uninstallPkg(\'' + esc(e.id) + '\')">Uninstall</button>';
+    } else {
+      html += '<button class="btn btn-sm" style="background:var(--green);color:#000;font-size:.75rem" onclick="event.stopPropagation();installPkg(\'' + esc(e.id) + '\')">Install to Panel</button>';
+    }
+    html += '<button class="btn btn-sm btn-ghost" style="font-size:.75rem;color:var(--red)" onclick="event.stopPropagation();removePkg(\'' + esc(e.id) + '\')">Remove</button>';
+    html += '</div>';
+    html += '</div></div>';
+  });
+
+  grid.innerHTML = html;
+}
+
+function toggleCard(el) { el.classList.toggle('expanded'); }
+
+// ─── Package Actions ───
+function installPkg(id) {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  if (!confirm('Install this skill to your panel?')) return;
+  panelApi('/api/hub/install/' + encodeURIComponent(id), { method: 'POST' }).then(function(r) {
+    toast(r.message || 'Installed', 'success');
+    loadPackages();
+  }).catch(function(e) { toast('Install failed: ' + e.message, 'error'); });
+}
+
+function uninstallPkg(id) {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  if (!confirm('Uninstall this skill?')) return;
+  panelApi('/api/hub/uninstall/' + encodeURIComponent(id), { method: 'POST' }).then(function(r) {
+    toast(r.message || 'Uninstalled', 'success');
+    loadPackages();
+  }).catch(function(e) { toast('Uninstall failed: ' + e.message, 'error'); });
+}
+
+function removePkg(id) {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  if (!confirm('Remove this package from the hub entirely?')) return;
+  panelApi('/api/hub/remove/' + encodeURIComponent(id), { method: 'POST' }).then(function(r) {
+    toast(r.message || 'Removed', 'success');
+    loadPackages();
+  }).catch(function(e) { toast('Remove failed: ' + e.message, 'error'); });
+}
+
+function inspectPkg(id) {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  panelApi('/api/hub/inspect/' + encodeURIComponent(id)).then(function(r) {
+    var pkg = r.package || {};
+    var audit = r.audit || {};
+    var h = '';
+
+    h += '<div style="margin-bottom:12px"><strong style="font-size:1.125rem">' + esc(pkg.name || id) + '</strong>';
+    if (pkg.version) h += ' <span class="badge badge-yellow" style="font-size:.6rem">v' + esc(pkg.version) + '</span>';
+    h += '</div>';
+    if (pkg.author) h += '<div style="margin-bottom:8px;color:var(--muted)">by ' + esc(pkg.author) + '</div>';
+    if (pkg.description) h += '<div style="margin-bottom:12px">' + esc(pkg.description) + '</div>';
+
+    // Security audit
+    h += '<div style="margin-bottom:12px"><strong>Security Audit</strong>';
+    if (audit.safe) {
+      h += ' <span class="badge badge-green" style="font-size:.6rem">SAFE</span>';
+    } else {
+      h += ' <span class="badge badge-red" style="font-size:.6rem">WARNINGS</span>';
+    }
+    h += '</div>';
+    if (audit.warnings && audit.warnings.length) {
+      h += '<div style="margin-bottom:12px;padding:8px;background:rgba(255,0,0,.1);border-radius:6px;font-size:.75rem">';
+      audit.warnings.forEach(function(w) { h += '<div style="color:var(--red)">&#9888; ' + esc(w) + '</div>'; });
+      h += '</div>';
+    }
+
+    // Tools
+    if (pkg.tools && pkg.tools.length) {
+      h += '<div style="margin-bottom:8px"><strong>Tools (' + pkg.tools.length + ')</strong></div>';
+      pkg.tools.forEach(function(t) {
+        h += '<div style="padding:6px 8px;background:var(--surface2);border-radius:6px;margin-bottom:4px">';
+        h += '<span style="color:var(--cyan);font-weight:700">' + esc(t.name) + '</span>';
+        if (t.riskLevel) {
+          var rc = t.riskLevel === 'high' ? 'var(--red)' : t.riskLevel === 'medium' ? 'var(--yellow)' : 'var(--green)';
+          h += ' <span class="badge" style="font-size:.55rem;background:' + rc + ';color:#000">' + t.riskLevel + '</span>';
+        }
+        if (t.description) h += '<div style="color:var(--muted);font-size:.75rem;margin-top:2px">' + esc(t.description) + '</div>';
+        h += '</div>';
+      });
+    }
+
+    // Tags
+    if (pkg.tags && pkg.tags.length) {
+      h += '<div style="margin-top:12px">';
+      pkg.tags.forEach(function(t) { h += '<span class="badge badge-blue" style="font-size:.6rem;margin-right:4px">' + esc(t) + '</span>'; });
+      h += '</div>';
+    }
+
+    // Source preview
+    if (pkg.sourcePreview) {
+      h += '<div style="margin-top:12px"><strong>Source Preview</strong></div>';
+      h += '<pre style="background:var(--surface2);padding:12px;border-radius:6px;overflow-x:auto;font-size:.7rem;max-height:300px;overflow-y:auto;margin-top:4px">' + esc(pkg.sourcePreview) + '</pre>';
+    }
+
+    $('#inspectBody').innerHTML = h;
+    $('#inspectModal').classList.add('show');
+  }).catch(function(e) { toast('Inspect failed: ' + e.message, 'error'); });
+}
+function hideInspect() { $('#inspectModal').classList.remove('show'); }
+
+// ─── Publish ───
+function showPublish() { $('#publishModal').classList.add('show'); $('#pubResult').textContent = ''; }
+function hidePublish() { $('#publishModal').classList.remove('show'); }
+
+function doPublish() {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  var name = $('#pubName').value.trim();
+  var author = $('#pubAuthor').value.trim();
+  var tags = $('#pubTags').value.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+  var readme = $('#pubReadme').value.trim();
+  if (!name) { toast('Skill name is required', 'error'); return; }
+
+  var out = $('#pubResult');
+  out.textContent = 'Publishing...';
+
+  panelApi('/api/hub/export', {
+    method: 'POST',
+    body: JSON.stringify({ skillName: name, author: author, tags: tags, readme: readme })
+  }).then(function(r) {
+    out.innerHTML = '<span style="color:var(--green)">&#10003; ' + esc(r.message || 'Published') + '</span>';
+    if (r.path) out.innerHTML += '<br><span style="color:var(--muted);font-size:.75rem">' + esc(r.path) + '</span>';
+    loadPackages();
+  }).catch(function(e) {
+    out.innerHTML = '<span style="color:var(--red)">&#10007; ' + esc(e.message || 'Publish failed') + '</span>';
+  });
+}
+
+// ─── Import ───
+function showImport() { $('#importModal').classList.add('show'); $('#importResult').textContent = ''; }
+function hideImport() { $('#importModal').classList.remove('show'); }
+
+function doImport() {
+  if (!panelConnected) { toast('Connect to panel first', 'error'); return; }
+  var filePath = $('#importPath').value.trim();
+  if (!filePath) { toast('File path is required', 'error'); return; }
+
+  var out = $('#importResult');
+  out.textContent = 'Importing...';
+
+  panelApi('/api/hub/import', {
+    method: 'POST',
+    body: JSON.stringify({ filePath: filePath })
+  }).then(function(r) {
+    out.innerHTML = '<span style="color:var(--green)">&#10003; ' + esc(r.message || 'Imported') + '</span>';
+    if (r.audit && !r.audit.safe) {
+      out.innerHTML += '<br><span style="color:var(--yellow)">&#9888; Security warnings — inspect before installing</span>';
+    }
+    loadPackages();
+  }).catch(function(e) {
+    out.innerHTML = '<span style="color:var(--red)">&#10007; ' + esc(e.message || 'Import failed') + '</span>';
+  });
+}
+
+// ─── Misc ───
+function refreshAll() {
+  if (panelConnected) loadPackages();
+  else toast('Connect to panel first', 'error');
+}
+
+function toast(msg, type) {
+  type = type || 'info';
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(function() { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 300); }, 4000);
+}
+
+// Close modals on backdrop
+document.addEventListener('click', function(e) {
+  if (e.target === $('#publishModal')) hidePublish();
+  if (e.target === $('#importModal')) hideImport();
+  if (e.target === $('#inspectModal')) hideInspect();
+});
+
+$('#footYear').textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

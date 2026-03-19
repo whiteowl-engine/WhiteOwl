@@ -1,0 +1,23 @@
+node_modules/
+dist/
+data/
+*.db
+*.db-journal
+*.db.backups/
+.env
+.env.*
+*.log
+*.pem
+*.key
+cookies.json
+auth-sessions.json
+twitter-cookies.json
+
+# Temp/backup files
+_js_temp.txt
+*.bak
+*_js.txt
+js-portion.txt
+js_temp.txt
+new-card.txt
+new-css.txt
