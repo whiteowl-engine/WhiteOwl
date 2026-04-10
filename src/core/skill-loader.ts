@@ -1,4 +1,6 @@
-import { Skill, SkillManifest, SkillContext, ToolDefinition, LoggerInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, ToolDefinition, LoggerInterface } from '../types.ts';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class SkillLoader {
   private skills = new Map<string, Skill>();
@@ -69,7 +71,10 @@ export class SkillLoader {
       type: 'function' as const,
       function: {
         name: tool.name,
-        description: tool.description,
+
+        description: tool.description.length > 200
+          ? tool.description.slice(0, 197) + '...'
+          : tool.description,
         parameters: tool.parameters,
       },
     }));
@@ -77,6 +82,34 @@ export class SkillLoader {
 
   getAllManifests(): SkillManifest[] {
     return Array.from(this.skills.values()).map(s => s.manifest);
+  }
+
+getToolCatalog(skillNames: string[]): string {
+    const sections: string[] = [];
+    for (const name of skillNames) {
+      const skill = this.skills.get(name);
+      if (!skill) continue;
+      const m = skill.manifest;
+      const toolList = m.tools.map(t => t.name).join(', ');
+      sections.push(`[${name}] ${(m.description || '').slice(0, 100)}\n  Tools: ${toolList}`);
+    }
+    return sections.join('\n');
+  }
+
+getToolDetails(toolName: string): ToolDefinition | null {
+    const entry = this.toolIndex.get(toolName);
+    return entry ? entry.tool : null;
+  }
+
+getSkillNameForTool(toolName: string): string | null {
+    const entry = this.toolIndex.get(toolName);
+    return entry ? entry.skill.manifest.name : null;
+  }
+
+getSiblingToolNames(toolName: string): string[] {
+    const entry = this.toolIndex.get(toolName);
+    if (!entry) return [];
+    return entry.skill.manifest.tools.map(t => t.name);
   }
 
   async shutdownAll(): Promise<void> {
@@ -89,5 +122,95 @@ export class SkillLoader {
     }
     this.skills.clear();
     this.toolIndex.clear();
+    if (this.skillWatcher) {
+      this.skillWatcher.close();
+      this.skillWatcher = null;
+    }
+  }
+
+
+private markdownSkills = new Map<string, { name: string; description: string; instructions: string; dir: string }>();
+  private skillWatcher: fs.FSWatcher | null = null;
+
+loadMarkdownSkills(skillsDir: string): number {
+    if (!fs.existsSync(skillsDir)) return 0;
+    let loaded = 0;
+
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMd = path.join(skillsDir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      try {
+        const content = fs.readFileSync(skillMd, 'utf-8');
+        const parsed = this.parseSkillMd(content, entry.name);
+        if (parsed) {
+          this.markdownSkills.set(parsed.name, { ...parsed, dir: path.join(skillsDir, entry.name) });
+          loaded++;
+          this.logger.info(`SKILL.md loaded: ${parsed.name} — ${parsed.description.slice(0, 80)}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to load SKILL.md in ${entry.name}: ${err.message}`);
+      }
+    }
+
+    return loaded;
+  }
+
+private parseSkillMd(content: string, fallbackName: string): { name: string; description: string; instructions: string } | null {
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+    if (!fmMatch) {
+
+      return { name: fallbackName, description: `Custom skill: ${fallbackName}`, instructions: content.trim() };
+    }
+
+    const frontmatter = fmMatch[1];
+    const body = fmMatch[2].trim();
+
+
+    const getVal = (key: string): string => {
+      const m = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
+      return m ? m[1].trim().replace(/^["']|["']$/g, '') : '';
+    };
+
+    const name = getVal('name') || fallbackName;
+    const description = getVal('description') || `Skill: ${name}`;
+
+    return { name, description, instructions: body };
+  }
+
+getMarkdownSkillPrompt(): string {
+    if (this.markdownSkills.size === 0) return '';
+    const parts: string[] = ['## INSTALLED SKILLS'];
+    for (const [name, skill] of this.markdownSkills) {
+      const cap = 3000;
+      const instructions = skill.instructions.length > cap
+        ? skill.instructions.slice(0, cap) + '\n[Truncated]'
+        : skill.instructions;
+      parts.push(`### ${name}\n${skill.description}\n\n${instructions}`);
+    }
+    return parts.join('\n\n');
+  }
+
+watchSkillsDir(skillsDir: string): void {
+    if (!fs.existsSync(skillsDir)) return;
+    try {
+      this.skillWatcher = fs.watch(skillsDir, { recursive: true }, (event, filename) => {
+        if (filename && filename.endsWith('SKILL.md')) {
+          this.logger.info(`SKILL.md change detected: ${filename} — reloading skills`);
+          this.markdownSkills.clear();
+          this.loadMarkdownSkills(skillsDir);
+        }
+      });
+    } catch {  }
+  }
+
+getMarkdownSkillsList(): Array<{ name: string; description: string; dir: string }> {
+    return Array.from(this.markdownSkills.values()).map(s => ({
+      name: s.name,
+      description: s.description,
+      dir: s.dir,
+    }));
   }
 }

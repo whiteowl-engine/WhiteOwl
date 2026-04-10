@@ -1,14 +1,6 @@
-/**
- * Multi-Wallet Manager — Phase 6
- *
- * Manages multiple Solana wallets for parallel trading:
- * - Round-robin or strategy-based wallet selection
- * - Per-wallet balance tracking and risk limits
- * - Automatic wallet rotation to avoid detection
- */
 
-import { SolanaWallet } from './solana';
-import { LoggerInterface } from '../types';
+import { SolanaWallet } from './solana.ts';
+import { LoggerInterface } from '../types.ts';
 
 export interface WalletEntry {
   id: string;
@@ -35,9 +27,6 @@ export class MultiWalletManager {
     this.logger = logger;
   }
 
-  /**
-   * Add a wallet from private key (base58 or JSON array).
-   */
   addWallet(id: string, privateKey: string, label: string = ''): void {
     const wallet = new SolanaWallet(this.rpcUrl, this.logger, privateKey);
     this.wallets.set(id, {
@@ -53,32 +42,20 @@ export class MultiWalletManager {
     this.logger.info(`Multi-wallet: added ${id} (${wallet.getAddress().slice(0, 8)}...)`);
   }
 
-  /**
-   * Remove a wallet by ID.
-   */
-  removeWallet(id: string): boolean {
+removeWallet(id: string): boolean {
     return this.wallets.delete(id);
   }
 
-  /**
-   * Enable/disable a wallet.
-   */
-  setEnabled(id: string, enabled: boolean): void {
+setEnabled(id: string, enabled: boolean): void {
     const entry = this.wallets.get(id);
     if (entry) entry.enabled = enabled;
   }
 
-  /**
-   * Set wallet selection strategy.
-   */
-  setStrategy(strategy: WalletSelectionStrategy): void {
+setStrategy(strategy: WalletSelectionStrategy): void {
     this.strategy = strategy;
   }
 
-  /**
-   * Select next wallet for trading based on strategy.
-   */
-  selectWallet(): WalletEntry | null {
+selectWallet(): WalletEntry | null {
     const available = Array.from(this.wallets.values()).filter(w => w.enabled && w.balance > 0.01);
     if (available.length === 0) return null;
 
@@ -103,17 +80,11 @@ export class MultiWalletManager {
     }
   }
 
-  /**
-   * Get a specific wallet.
-   */
-  getWallet(id: string): WalletEntry | undefined {
+getWallet(id: string): WalletEntry | undefined {
     return this.wallets.get(id);
   }
 
-  /**
-   * Record a trade on a wallet.
-   */
-  recordTrade(id: string, pnl: number): void {
+recordTrade(id: string, pnl: number): void {
     const entry = this.wallets.get(id);
     if (entry) {
       entry.totalTrades++;
@@ -122,10 +93,7 @@ export class MultiWalletManager {
     }
   }
 
-  /**
-   * Refresh all wallet balances.
-   */
-  async refreshBalances(): Promise<void> {
+async refreshBalances(): Promise<void> {
     for (const [, entry] of this.wallets) {
       try {
         entry.balance = await entry.wallet.getBalance();
@@ -135,10 +103,7 @@ export class MultiWalletManager {
     }
   }
 
-  /**
-   * Get all wallets with status.
-   */
-  getAllWallets(): Array<{
+getAllWallets(): Array<{
     id: string;
     address: string;
     label: string;
@@ -158,10 +123,7 @@ export class MultiWalletManager {
     }));
   }
 
-  /**
-   * Total balance across all wallets.
-   */
-  getTotalBalance(): number {
+getTotalBalance(): number {
     let total = 0;
     for (const [, entry] of this.wallets) {
       total += entry.balance;

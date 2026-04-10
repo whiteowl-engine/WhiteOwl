@@ -1,14 +1,17 @@
 import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
+import * as bip39 from 'bip39';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { WalletInterface, LoggerInterface } from '../types';
+import { WalletInterface, LoggerInterface } from '../types.ts';
 
 interface StoredWallet {
   name: string;
   address: string;
-  privateKey: string;   // base58-encoded
+  privateKey: string;
   createdAt: number;
+  isBurn?: boolean;
 }
 
 interface WalletStore {
@@ -42,7 +45,6 @@ export class SolanaWallet implements WalletInterface {
     this.connection = new Connection(rpcUrl, 'confirmed');
     this.logger = logger;
 
-    // 1) If explicit key from env — use it
     if (privateKeyOrPath) {
       if (fs.existsSync(privateKeyOrPath)) {
         const raw = fs.readFileSync(privateKeyOrPath, 'utf-8');
@@ -56,7 +58,7 @@ export class SolanaWallet implements WalletInterface {
       return;
     }
 
-    // 2) Try loading the active wallet from persistent store
+
     const store = loadStore();
     if (store.activeAddress && store.wallets.length > 0) {
       const active = store.wallets.find(w => w.address === store.activeAddress) || store.wallets[0];
@@ -70,7 +72,7 @@ export class SolanaWallet implements WalletInterface {
       }
     }
 
-    // 3) No wallet at all
+
     this.keypair = null;
     this.logger.warn('No wallet configured — waiting for user to generate or import.');
   }
@@ -84,26 +86,26 @@ export class SolanaWallet implements WalletInterface {
     return this.keypair;
   }
 
-  // ======= Multi-wallet store methods =======
 
   getStoredWallets(): StoredWallet[] {
-    return loadStore().wallets.map(w => ({ ...w, privateKey: '' })); // don't leak keys
+    return loadStore().wallets.map(w => ({ ...w, privateKey: '' }));
   }
 
-  addCurrentToStore(name: string): void {
+  addCurrentToStore(name: string, isBurn?: boolean): void {
     const kp = this.requireKeypair();
     const store = loadStore();
     const address = kp.publicKey.toBase58();
-    // Don't add duplicates
+
     if (store.wallets.some(w => w.address === address)) {
-      // Just update name & set active
-      store.wallets = store.wallets.map(w => w.address === address ? { ...w, name } : w);
+
+      store.wallets = store.wallets.map(w => w.address === address ? { ...w, name, ...(isBurn != null ? { isBurn } : {}) } : w);
     } else {
       store.wallets.push({
         name,
         address,
         privateKey: bs58.encode(kp.secretKey),
         createdAt: Date.now(),
+        ...(isBurn ? { isBurn } : {}),
       });
     }
     store.activeAddress = address;
@@ -131,13 +133,13 @@ export class SolanaWallet implements WalletInterface {
     const idx = store.wallets.findIndex(w => w.address === address);
     if (idx === -1) return false;
     store.wallets.splice(idx, 1);
-    // If we removed the active wallet, switch to the first remaining one or clear
+
     if (store.activeAddress === address) {
       if (store.wallets.length > 0) {
         const next = store.wallets[0];
         store.activeAddress = next.address;
         saveStore(store);
-        // Load the keypair directly
+
         try {
           const decoded = bs58.decode(next.privateKey);
           this.keypair = Keypair.fromSecretKey(decoded);
@@ -175,6 +177,10 @@ export class SolanaWallet implements WalletInterface {
 
   getConnection(): Connection {
     return this.connection;
+  }
+
+  getKeypairRaw(): Keypair {
+    return this.requireKeypair();
   }
 
   updateRpc(rpcUrl: string): void {
@@ -238,7 +244,7 @@ export class SolanaWallet implements WalletInterface {
       return txHash;
     }
 
-    // VersionedTransaction
+
     (transaction as VersionedTransaction).sign([kp]);
     const raw = (transaction as VersionedTransaction).serialize();
     const txHash = await this.connection.sendRawTransaction(raw, {
@@ -253,18 +259,89 @@ export class SolanaWallet implements WalletInterface {
     return bs58.encode(this.requireKeypair().secretKey);
   }
 
-  importFromKey(privateKey: string, name?: string): void {
+  importFromKey(privateKey: string, name?: string, isBurn?: boolean): void {
     const decoded = bs58.decode(privateKey);
     this.keypair = Keypair.fromSecretKey(decoded);
     this.logger.info(`Wallet imported: ${this.getAddress()}`);
-    this.addCurrentToStore(name || 'Imported ' + this.getAddress().substring(0, 6));
+    this.addCurrentToStore(name || 'Imported ' + this.getAddress().substring(0, 6), isBurn);
   }
 
-  generateNew(name?: string): { address: string; privateKey: string } {
-    this.keypair = Keypair.generate();
+importFromSeed(mnemonic: string, name?: string): void {
+    const words = mnemonic.trim().split(/\s+/);
+    if (words.length !== 12 && words.length !== 24) {
+      throw new Error('Mnemonic must be exactly 12 or 24 words');
+    }
+
+    const mnemonicBuf = Buffer.from(words.join(' ').normalize('NFKD'), 'utf8');
+    const saltBuf = Buffer.from('mnemonic'.normalize('NFKD'), 'utf8');
+    const seed = crypto.pbkdf2Sync(mnemonicBuf, saltBuf, 2048, 64, 'sha512');
+
+    const HMAC_KEY = 'ed25519 seed';
+    let I = crypto.createHmac('sha512', HMAC_KEY).update(seed).digest();
+    let key = I.slice(0, 32);
+    let chainCode = I.slice(32);
+    for (const index of [0x8000002c, 0x800001f5, 0x80000000, 0x80000000]) {
+      const indexBuf = Buffer.allocUnsafe(4);
+      indexBuf.writeUInt32BE(index, 0);
+      const data = Buffer.concat([Buffer.alloc(1), key, indexBuf]);
+      I = crypto.createHmac('sha512', chainCode).update(data).digest();
+      key = I.slice(0, 32);
+      chainCode = I.slice(32);
+    }
+    this.keypair = Keypair.fromSeed(key);
+    this.logger.info(`Wallet recovered from seed: ${this.getAddress()}`);
+    this.addCurrentToStore(name || 'Recovered ' + this.getAddress().substring(0, 6));
+  }
+
+  private static readonly BASE58_CHARS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+  generateNew(name?: string, prefix?: string, isBurn?: boolean): { address: string; privateKey: string; mnemonic?: string; attempts?: number } {
+    if (prefix) {
+      for (const ch of prefix) {
+        if (!SolanaWallet.BASE58_CHARS.includes(ch)) {
+          throw new Error(`Invalid prefix character '${ch}'. Base58 does not include 0, O, I, l`);
+        }
+      }
+      if (prefix.length > 4) throw new Error('Prefix too long (max 4 chars).');
+
+      let attempts = 0;
+      const maxAttempts = 50_000_000;
+      do {
+        attempts++;
+        this.keypair = Keypair.generate();
+        if (this.getAddress().startsWith(prefix)) break;
+        if (attempts >= maxAttempts) {
+          throw new Error(`Could not find address starting with '${prefix}' after ${attempts.toLocaleString()} attempts.`);
+        }
+      } while (true);
+      this.logger.info(`Vanity wallet generated: ${this.getAddress()} (prefix '${prefix}', ${attempts} attempts)`);
+      this.addCurrentToStore(name || 'Wallet ' + this.getAddress().substring(0, 6), isBurn);
+      return { address: this.getAddress(), privateKey: this.exportPrivateKey(), attempts };
+    }
+
+
+    const mnemonic = bip39.generateMnemonic(128);
+    this.deriveFromMnemonic(mnemonic);
     this.logger.info(`New wallet generated: ${this.getAddress()}`);
-    this.addCurrentToStore(name || 'Wallet ' + this.getAddress().substring(0, 6));
-    return { address: this.getAddress(), privateKey: this.exportPrivateKey() };
+    this.addCurrentToStore(name || 'Wallet ' + this.getAddress().substring(0, 6), isBurn);
+    return { address: this.getAddress(), privateKey: this.exportPrivateKey(), mnemonic };
+  }
+
+  private deriveFromMnemonic(mnemonic: string): void {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const HMAC_KEY = 'ed25519 seed';
+    let I = crypto.createHmac('sha512', HMAC_KEY).update(seed).digest();
+    let key = I.slice(0, 32);
+    let chainCode = I.slice(32);
+    for (const index of [0x8000002c, 0x800001f5, 0x80000000, 0x80000000]) {
+      const indexBuf = Buffer.allocUnsafe(4);
+      indexBuf.writeUInt32BE(index, 0);
+      const data = Buffer.concat([Buffer.alloc(1), key, indexBuf]);
+      I = crypto.createHmac('sha512', chainCode).update(data).digest();
+      key = I.slice(0, 32);
+      chainCode = I.slice(32);
+    }
+    this.keypair = Keypair.fromSeed(key);
   }
 
   async simulateTransaction(transaction: Transaction): Promise<{ success: boolean; error?: string }> {

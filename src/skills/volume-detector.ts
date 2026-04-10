@@ -1,36 +1,23 @@
-import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types';
-
-// =====================================================
-// Volume Detector — Volume Anomaly Detection
-//
-// Detects fake and manipulated volume patterns:
-// - Wash trading: same wallets cycling buy/sell
-// - Volume spikes: sudden abnormal volume increase
-// - Organic vs fake: unique wallets vs total volume ratio
-// - Coordinated pumps: many small buys in tight window
-// - Volume decay: dying interest pattern
-//
-// All signals are emitted as events for pipeline/exit-optimizer.
-// =====================================================
+import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types.ts';
 
 interface VolumeProfile {
   mint: string;
   symbol: string;
-  // Current metrics
+
   volume1m: number;
   volume5m: number;
   volume15m: number;
   txCount1m: number;
   txCount5m: number;
   uniqueWallets5m: number;
-  // Derived signals
-  washTradingScore: number;    // 0-100, higher = more suspicious
+
+  washTradingScore: number;
   isVolumeSpike: boolean;
-  spikeMultiple: number;       // How many x above baseline
-  organicScore: number;        // 0-100, higher = more organic
+  spikeMultiple: number;
+  organicScore: number;
   isCoordinatedPump: boolean;
   volumeTrend: 'increasing' | 'decreasing' | 'stable' | 'spike';
-  // History
+
   alerts: string[];
   lastUpdated: number;
 }
@@ -45,9 +32,9 @@ interface TradeRecord {
 
 interface VolumeTracker {
   profile: VolumeProfile;
-  trades: TradeRecord[];          // Rolling trade window
-  volumeHistory: { vol: number; ts: number }[]; // Historical volume snapshots
-  baselineVolume5m: number;       // Average 5m volume for comparison
+  trades: TradeRecord[];
+  volumeHistory: { vol: number; ts: number }[];
+  baselineVolume5m: number;
 }
 
 export class VolumeDetectorSkill implements Skill {
@@ -156,7 +143,7 @@ export class VolumeDetectorSkill implements Skill {
 
   private trackers = new Map<string, VolumeTracker>();
   private autoTrack = false;
-  private readonly TRADE_WINDOW = 15 * 60_000; // 15 min rolling
+  private readonly TRADE_WINDOW = 15 * 60_000;
   private readonly MAX_TRACKED = 200;
 
   private stats = {
@@ -172,7 +159,6 @@ export class VolumeDetectorSkill implements Skill {
     this.logger = ctx.logger;
     this.memory = ctx.memory;
 
-    // Auto-track positions
     this.eventBus.on('position:opened', (pos) => {
       if (this.autoTrack) this.startTracking(pos.mint, pos.symbol);
     });
@@ -199,14 +185,8 @@ export class VolumeDetectorSkill implements Skill {
     this.trackers.clear();
   }
 
-  // =====================================================
-  // Public API for external data feeds
-  // =====================================================
 
-  /**
-   * Record a trade event. Called from pump-monitor or similar.
-   */
-  recordTrade(mint: string, wallet: string, type: 'buy' | 'sell', solAmount: number): void {
+recordTrade(mint: string, wallet: string, type: 'buy' | 'sell', solAmount: number): void {
     const tracker = this.trackers.get(mint);
     if (!tracker) return;
 
@@ -214,11 +194,7 @@ export class VolumeDetectorSkill implements Skill {
     this.recalcProfile(tracker);
   }
 
-  /**
-   * Quick analysis for pipeline integration. 
-   * Returns volume anomaly flags without full analysis.
-   */
-  getQuickFlags(mint: string): { washScore: number; organicScore: number; flags: string[] } {
+getQuickFlags(mint: string): { washScore: number; organicScore: number; flags: string[] } {
     const tracker = this.trackers.get(mint);
     if (!tracker) return { washScore: 0, organicScore: 100, flags: [] };
 
@@ -229,9 +205,6 @@ export class VolumeDetectorSkill implements Skill {
     };
   }
 
-  // =====================================================
-  // Core tracking
-  // =====================================================
 
   private startTracking(mint: string, symbol?: string): { status: string; tracked: number } {
     if (this.trackers.has(mint)) return { status: 'already_tracking', tracked: this.trackers.size };
@@ -290,7 +263,7 @@ export class VolumeDetectorSkill implements Skill {
     const now = Date.now();
     const recentTrades = tracker.trades.filter(t => t.timestamp > now - 5 * 60_000);
 
-    // Group by wallet
+
     const walletActivity = new Map<string, { buys: number; sells: number; volume: number }>();
     for (const trade of recentTrades) {
       const activity = walletActivity.get(trade.wallet) || { buys: 0, sells: 0, volume: 0 };
@@ -300,7 +273,7 @@ export class VolumeDetectorSkill implements Skill {
       walletActivity.set(trade.wallet, activity);
     }
 
-    // Find wallets that both buy AND sell (wash trading indicator)
+
     const suspicious: { wallet: string; buys: number; sells: number; volume: number }[] = [];
     let cyclePatterns = 0;
 
@@ -311,7 +284,7 @@ export class VolumeDetectorSkill implements Skill {
       }
     }
 
-    // Wash trading score
+
     const totalTrades = recentTrades.length;
     const washTrades = suspicious.reduce((s, w) => s + w.buys + w.sells, 0);
     const washScore = totalTrades > 0 ? Math.min(100, (washTrades / totalTrades) * 100 * 1.5) : 0;
@@ -352,7 +325,7 @@ export class VolumeDetectorSkill implements Skill {
     const totalTrades = recent.length;
     const ratio = totalTrades > 0 ? uniqueWallets / totalTrades : 0;
 
-    // Higher ratio = more unique wallets = more organic
+
     const organicScore = Math.min(100, Math.round(ratio * 100 * 1.5));
 
     let assessment = 'unknown';
@@ -368,9 +341,6 @@ export class VolumeDetectorSkill implements Skill {
     return { status: enabled ? 'auto_track_enabled' : 'auto_track_disabled' };
   }
 
-  // =====================================================
-  // Recalculation engine
-  // =====================================================
 
   private recalcProfile(tracker: VolumeTracker): void {
     const now = Date.now();
@@ -378,34 +348,34 @@ export class VolumeDetectorSkill implements Skill {
     const cutoff5m = now - 5 * 60_000;
     const cutoff15m = now - 15 * 60_000;
 
-    // Clean old trades
+
     tracker.trades = tracker.trades.filter(t => t.timestamp > now - this.TRADE_WINDOW);
 
     const trades1m = tracker.trades.filter(t => t.timestamp > cutoff1m);
     const trades5m = tracker.trades.filter(t => t.timestamp > cutoff5m);
     const trades15m = tracker.trades.filter(t => t.timestamp > cutoff15m);
 
-    // Volume calculations
+
     tracker.profile.volume1m = trades1m.reduce((s, t) => s + t.solAmount, 0);
     tracker.profile.volume5m = trades5m.reduce((s, t) => s + t.solAmount, 0);
     tracker.profile.volume15m = trades15m.reduce((s, t) => s + t.solAmount, 0);
     tracker.profile.txCount1m = trades1m.length;
     tracker.profile.txCount5m = trades5m.length;
 
-    // Unique wallets
+
     tracker.profile.uniqueWallets5m = new Set(trades5m.map(t => t.wallet)).size;
 
-    // Store volume history
+
     tracker.volumeHistory.push({ vol: tracker.profile.volume5m, ts: now });
     if (tracker.volumeHistory.length > 100) tracker.volumeHistory = tracker.volumeHistory.slice(-100);
 
-    // Update baseline (moving average of 5m volume)
+
     if (tracker.volumeHistory.length >= 3) {
       const oldEntries = tracker.volumeHistory.slice(0, -1);
       tracker.baselineVolume5m = oldEntries.reduce((s, e) => s + e.vol, 0) / oldEntries.length;
     }
 
-    // Detect volume spike
+
     if (tracker.baselineVolume5m > 0) {
       tracker.profile.spikeMultiple = tracker.profile.volume5m / tracker.baselineVolume5m;
       tracker.profile.isVolumeSpike = tracker.profile.spikeMultiple >= 3;
@@ -414,7 +384,7 @@ export class VolumeDetectorSkill implements Skill {
       }
     }
 
-    // Wash trading score
+
     const walletActivity = new Map<string, { buys: number; sells: number }>();
     for (const trade of trades5m) {
       const activity = walletActivity.get(trade.wallet) || { buys: 0, sells: 0 };
@@ -433,15 +403,15 @@ export class VolumeDetectorSkill implements Skill {
       ? Math.min(100, Math.round((washTrades / trades5m.length) * 100))
       : 0;
 
-    // Organic score
+
     const ratio = trades5m.length > 0 ? tracker.profile.uniqueWallets5m / trades5m.length : 0;
     tracker.profile.organicScore = Math.min(100, Math.round(ratio * 100 * 1.5));
 
-    // Coordinated pump detection: many small buys in tight window
+
     const buys1m = trades1m.filter(t => t.type === 'buy');
     if (buys1m.length >= 10) {
       const avgBuySize = buys1m.reduce((s, t) => s + t.solAmount, 0) / buys1m.length;
-      // Many small buys = potential coordinated pump
+
       if (avgBuySize < 0.5 && buys1m.length >= 15) {
         tracker.profile.isCoordinatedPump = true;
         this.stats.coordinatedPumpsDetected++;
@@ -452,7 +422,7 @@ export class VolumeDetectorSkill implements Skill {
       tracker.profile.isCoordinatedPump = false;
     }
 
-    // Volume trend
+
     if (tracker.volumeHistory.length >= 3) {
       const last3 = tracker.volumeHistory.slice(-3).map(e => e.vol);
       if (tracker.profile.isVolumeSpike) tracker.profile.volumeTrend = 'spike';
@@ -461,7 +431,7 @@ export class VolumeDetectorSkill implements Skill {
       else tracker.profile.volumeTrend = 'stable';
     }
 
-    // Compile alerts
+
     const alerts: string[] = [];
     if (tracker.profile.washTradingScore > 50) alerts.push(`wash_trading_${tracker.profile.washTradingScore}`);
     if (tracker.profile.isVolumeSpike) alerts.push(`volume_spike_${tracker.profile.spikeMultiple.toFixed(1)}x`);
@@ -471,7 +441,7 @@ export class VolumeDetectorSkill implements Skill {
     tracker.profile.alerts = alerts;
     tracker.profile.lastUpdated = now;
 
-    // Update global stats
+
     const allOrganic: number[] = [];
     for (const t of this.trackers.values()) {
       allOrganic.push(t.profile.organicScore);

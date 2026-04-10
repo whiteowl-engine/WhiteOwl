@@ -1,4 +1,4 @@
-import { Skill, SkillManifest, SkillContext, LoggerInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, LoggerInterface } from '../types.ts';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const GOOGLE_SEARCH_URL = 'https://www.google.com/search';
@@ -29,7 +29,7 @@ export class WebSearchSkill implements Skill {
           type: 'object',
           properties: {
             url: { type: 'string', description: 'Full URL to fetch content from' },
-            maxLength: { type: 'number', description: 'Max characters to return (default: 8000)' },
+            maxLength: { type: 'number', description: 'Max characters to return (default: 5000)' },
           },
           required: ['url'],
         },
@@ -55,7 +55,7 @@ export class WebSearchSkill implements Skill {
           properties: {
             url: { type: 'string', description: 'Full URL to load in Chrome browser' },
             waitSelector: { type: 'string', description: 'Optional CSS selector to wait for before extracting (e.g. ".main-content", "#docs")' },
-            maxLength: { type: 'number', description: 'Max characters to return (default: 15000)' },
+            maxLength: { type: 'number', description: 'Max characters to return (default: 6000)' },
           },
           required: ['url'],
         },
@@ -87,7 +87,7 @@ export class WebSearchSkill implements Skill {
               items: { type: 'string' },
               description: 'Optional: specific search queries to run (default: auto-generated from topic). Provide 2-5 queries for best results.',
             },
-            maxPages: { type: 'number', description: 'Max pages to fetch and read (default: 6, max: 12)' },
+            maxPages: { type: 'number', description: 'Max pages to fetch and read (default: 4, max: 8)' },
             focusOn: { type: 'string', description: 'Optional: what to focus on when reading pages (e.g. "API endpoints and parameters", "code examples", "pricing")' },
           },
           required: ['topic'],
@@ -141,9 +141,6 @@ export class WebSearchSkill implements Skill {
 
   async shutdown(): Promise<void> {}
 
-  // =====================================================
-  // DuckDuckGo HTML search (no API key required)
-  // =====================================================
 
   private async webSearch(query: string, limit: number = 8): Promise<any> {
     const safeLimit = Math.min(Math.max(limit, 1), 20);
@@ -156,7 +153,7 @@ export class WebSearchSkill implements Skill {
         await new Promise(r => setTimeout(r, delay));
       }
 
-      // Try DuckDuckGo HTML first
+
       try {
         const results = await this.duckDuckGoSearch(query, safeLimit);
         if (results.length > 0) {
@@ -166,7 +163,7 @@ export class WebSearchSkill implements Skill {
         this.logger.debug(`DuckDuckGo search failed (attempt ${attempt + 1}): ${err.message}`);
       }
 
-      // Fallback: DuckDuckGo Lite
+
       try {
         const results = await this.duckDuckGoLite(query, safeLimit);
         if (results.length > 0) {
@@ -182,7 +179,7 @@ export class WebSearchSkill implements Skill {
 
   private async duckDuckGoSearch(query: string, limit: number): Promise<Array<{ title: string; url: string; snippet: string }>> {
     const encodedQuery = encodeURIComponent(query);
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodedQuery}`, {
+        const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodedQuery}`, {
       headers: {
         'User-Agent': USER_AGENT,
         'Accept': 'text/html',
@@ -197,7 +194,7 @@ export class WebSearchSkill implements Skill {
 
   private async duckDuckGoLite(query: string, limit: number): Promise<Array<{ title: string; url: string; snippet: string }>> {
     const encodedQuery = encodeURIComponent(query);
-    const res = await fetch(`https://lite.duckduckgo.com/lite/?q=${encodedQuery}`, {
+        const res = await fetch(`https://lite.duckduckgo.com/lite?q=${encodedQuery}`, {
       headers: {
         'User-Agent': USER_AGENT,
         'Accept': 'text/html',
@@ -212,12 +209,11 @@ export class WebSearchSkill implements Skill {
   private parseDDGResults(html: string, limit: number): Array<{ title: string; url: string; snippet: string }> {
     const results: Array<{ title: string; url: string; snippet: string }> = [];
 
-    // Extract result links — DDG HTML wraps results in <a class="result__a"> or similar
-    // Pattern 1: result__a links
+
     const linkPattern = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi;
-    // Pattern 2: result__snippet
+
     const snippetPattern = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)<\/a>/gi;
-    // Pattern 3: generic result link + snippet for lite version
+
     const liteResultPattern = /<a[^>]*rel="nofollow"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi;
 
     const links: Array<{ url: string; title: string }> = [];
@@ -236,7 +232,7 @@ export class WebSearchSkill implements Skill {
       snippets.push(this.stripHtml(match[1]));
     }
 
-    // If pattern 1 worked
+
     if (links.length > 0) {
       for (let i = 0; i < Math.min(links.length, limit); i++) {
         results.push({
@@ -248,7 +244,7 @@ export class WebSearchSkill implements Skill {
       return results;
     }
 
-    // Fallback: lite version parsing
+
     while ((match = liteResultPattern.exec(html)) !== null) {
       const url = this.cleanUrl(match[1]);
       const title = this.stripHtml(match[2]);
@@ -258,7 +254,7 @@ export class WebSearchSkill implements Skill {
       }
     }
 
-    // If nothing found, try a more aggressive pattern
+
     if (results.length === 0) {
       const hrefPattern = /href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/gi;
       while ((match = hrefPattern.exec(html)) !== null) {
@@ -274,11 +270,8 @@ export class WebSearchSkill implements Skill {
     return results;
   }
 
-  // =====================================================
-  // URL content fetcher
-  // =====================================================
 
-  private async fetchUrl(url: string, maxLength: number = 8000): Promise<any> {
+  private async fetchUrl(url: string, maxLength: number = 5000): Promise<any> {
     if (!url || !url.startsWith('http')) {
       return { error: 'Invalid URL — must start with http:// or https://' };
     }
@@ -311,10 +304,10 @@ export class WebSearchSkill implements Skill {
           const json = JSON.parse(raw);
           const text = JSON.stringify(json, null, 2).slice(0, maxLength);
           return { url, contentType: 'json', length: text.length, content: text };
-        } catch { /* fall through to text */ }
+        } catch {  }
       }
 
-      // Extract readable text from HTML
+
       const text = this.extractReadableText(raw).slice(0, maxLength);
 
       return {
@@ -329,9 +322,6 @@ export class WebSearchSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Crypto news aggregator
-  // =====================================================
 
   private async cryptoNews(topic?: string, limit: number = 10): Promise<any> {
     const searchTopic = topic || 'Solana memecoin';
@@ -346,12 +336,12 @@ export class WebSearchSkill implements Skill {
       try {
         const results = await this.duckDuckGoSearch(q, Math.ceil(limit / 2));
         for (const r of results) {
-          // Dedupe by URL
+
           if (!allResults.some(existing => existing.url === r.url)) {
             allResults.push({ ...r, source: new URL(r.url).hostname });
           }
         }
-      } catch { /* skip failed query */ }
+      } catch {  }
     }
 
     return {
@@ -361,21 +351,18 @@ export class WebSearchSkill implements Skill {
     };
   }
 
-  // =====================================================
-  // Browser-powered page fetch (JS rendering via Puppeteer)
-  // =====================================================
 
-  private async browserFetch(url: string, waitSelector?: string, maxLength: number = 15000): Promise<any> {
+  private async browserFetch(url: string, waitSelector?: string, maxLength: number = 6000): Promise<any> {
     if (!url || !/^https?:\/\//i.test(url)) {
       return { error: 'Invalid URL — must start with http:// or https://' };
     }
 
-    // If browser available — use Puppeteer for full JS rendering
+
     if (this.browser) {
       try {
         const page = await this.browser.newPage?.() || null;
         if (!page) {
-          // fallback to fetchPage method
+
           const result = await this.browser.fetchPage(url);
           return { url, title: result.title, content: result.text.slice(0, maxLength), rendered: true, engine: 'puppeteer' };
         }
@@ -385,10 +372,10 @@ export class WebSearchSkill implements Skill {
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
 
         if (waitSelector) {
-          try { await page.waitForSelector(waitSelector, { timeout: 8000 }); } catch { /* ok */ }
+          try { await page.waitForSelector(waitSelector, { timeout: 8000 }); } catch {  }
         }
 
-        // Wait a bit for dynamic content
+
         await new Promise(r => setTimeout(r, 1500));
 
         const result = await page.evaluate(() => {
@@ -418,7 +405,7 @@ export class WebSearchSkill implements Skill {
       }
     }
 
-    // Fallback: try fetchPage from browser service
+
     if (this.browser?.fetchPage) {
       try {
         const result = await this.browser.fetchPage(url);
@@ -428,13 +415,10 @@ export class WebSearchSkill implements Skill {
       }
     }
 
-    // Last resort: plain HTTP fetch  
+
     return this.fetchUrl(url, maxLength);
   }
 
-  // =====================================================
-  // Google Search via headless Chrome
-  // =====================================================
 
   private async googleSearch(query: string, limit: number = 10, start: number = 0): Promise<any> {
     const safeLimit = Math.min(Math.max(limit, 1), 20);
@@ -449,7 +433,7 @@ export class WebSearchSkill implements Skill {
         await new Promise(r => setTimeout(r, delay));
       }
 
-      // Try Google via browser if available
+
       if (this.browser) {
         try {
           const results = await this.googleSearchBrowser(query, safeLimit, safeStart);
@@ -461,7 +445,7 @@ export class WebSearchSkill implements Skill {
         }
       }
 
-      // Try Google via HTTP fetch
+
       try {
         const results = await this.googleSearchHTTP(query, safeLimit, safeStart);
         if (results.length > 0) {
@@ -471,13 +455,13 @@ export class WebSearchSkill implements Skill {
         this.logger.debug(`Google HTTP search failed (attempt ${attempt + 1}): ${err.message}`);
       }
 
-      // Try DDG fallback (only on last attempt to avoid duplicating fallback calls)
+
       if (attempt === MAX_RETRIES) {
         return this.webSearch(query, safeLimit);
       }
     }
 
-    // Should not reach here, but just in case
+
     return this.webSearch(query, safeLimit);
   }
 
@@ -488,9 +472,9 @@ export class WebSearchSkill implements Skill {
     let page: any;
     try {
       if (this.browser.fetchPage) {
-        // Use browser service — we need to parse the rendered page ourselves
+
         const result = await this.browser.fetchPage(searchUrl);
-        // Parse text-based results from Google rendered output
+
         return this.parseGoogleText(result.text, limit);
       }
     } catch (err: any) {
@@ -520,14 +504,13 @@ export class WebSearchSkill implements Skill {
   private parseGoogleHTML(html: string, limit: number): Array<{ title: string; url: string; snippet: string }> {
     const results: Array<{ title: string; url: string; snippet: string }> = [];
 
-    // Google wraps results in <div class="g"> with <a href="url"><h3>title</h3></a>
-    // Pattern 1: Standard desktop results
+
     const resultBlocks = html.match(/<div class="[^"]*g[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) || [];
 
     for (const block of resultBlocks) {
-      // Extract URL from <a href="">
+
       const urlMatch = block.match(/<a[^>]*href="(\/url\?q=([^&"]+)|https?:\/\/[^"]+)"[^>]*>/i);
-      // Extract title from <h3>
+
       const titleMatch = block.match(/<h3[^>]*>(.*?)<\/h3>/si);
 
       if (urlMatch && titleMatch) {
@@ -539,7 +522,7 @@ export class WebSearchSkill implements Skill {
         const title = this.stripHtml(titleMatch[1]);
 
         if (url.startsWith('http') && !url.includes('google.com') && title) {
-          // Try to get snippet
+
           const snippetMatch = block.match(/<(?:span|div)[^>]*class="[^"]*(?:st|IsZvec|VwiC3b)[^"]*"[^>]*>(.*?)<\/(?:span|div)>/si);
           const snippet = snippetMatch ? this.stripHtml(snippetMatch[1]) : '';
 
@@ -549,7 +532,7 @@ export class WebSearchSkill implements Skill {
       }
     }
 
-    // Fallback: more aggressive pattern
+
     if (results.length === 0) {
       const linkPattern = /<a[^>]*href="\/url\?q=(https?[^&"]+)[^"]*"[^>]*>[\s\S]*?<h3[^>]*>(.*?)<\/h3>/gi;
       let match;
@@ -566,15 +549,15 @@ export class WebSearchSkill implements Skill {
   }
 
   private parseGoogleText(text: string, limit: number): Array<{ title: string; url: string; snippet: string }> {
-    // Parse Google results from rendered text (innerText)
+
     const results: Array<{ title: string; url: string; snippet: string }> = [];
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
     for (let i = 0; i < lines.length && results.length < limit; i++) {
-      // Look for URLs in the text
+
       const urlMatch = lines[i].match(/(https?:\/\/[^\s]+)/);
       if (urlMatch && !urlMatch[1].includes('google.com') && !urlMatch[1].includes('gstatic.com')) {
-        // Title is likely the line before or the same line
+
         const title = i > 0 ? lines[i - 1] : lines[i].replace(urlMatch[0], '').trim();
         const snippet = i + 1 < lines.length ? lines[i + 1] : '';
 
@@ -591,21 +574,18 @@ export class WebSearchSkill implements Skill {
     return results;
   }
 
-  // =====================================================
-  // Deep Research — automated multi-page research
-  // =====================================================
 
-  private async deepResearch(topic: string, searchQueries?: string[], maxPages: number = 6, focusOn?: string): Promise<any> {
-    const safeMaxPages = Math.min(Math.max(maxPages, 1), 12);
+  private async deepResearch(topic: string, searchQueries?: string[], maxPages: number = 4, focusOn?: string): Promise<any> {
+    const safeMaxPages = Math.min(Math.max(maxPages, 1), 8);
 
-    // Step 1: Generate search queries
+
     const queries = searchQueries && searchQueries.length > 0
       ? searchQueries.slice(0, 5)
       : this.generateSearchQueries(topic);
 
     this.logger.info(`[deep_research] Topic: "${topic}", queries: ${queries.length}, maxPages: ${safeMaxPages}`);
 
-    // Step 2: Search across multiple queries
+
     const allSearchResults: Array<{ title: string; url: string; snippet: string; query: string }> = [];
     const seenUrls = new Set<string>();
 
@@ -621,10 +601,10 @@ export class WebSearchSkill implements Skill {
             }
           }
         }
-      } catch { /* skip */ }
+      } catch {  }
     }
 
-    // Also try Google search for broader coverage
+
     for (const q of queries.slice(0, 2)) {
       try {
         const googleResult = await this.googleSearch(q, 5);
@@ -637,10 +617,10 @@ export class WebSearchSkill implements Skill {
             }
           }
         }
-      } catch { /* skip */ }
+      } catch {  }
     }
 
-    // Step 3: Prioritize and fetch top pages
+
     const prioritized = this.prioritizeResults(allSearchResults, topic);
     const pagesToFetch = prioritized.slice(0, safeMaxPages);
 
@@ -650,7 +630,7 @@ export class WebSearchSkill implements Skill {
 
     for (const result of pagesToFetch) {
       try {
-        // Use browser fetch for JS-heavy pages, plain fetch otherwise
+
         const isJSHeavy = this.isJSHeavySite(result.url);
         let page: any;
 
@@ -673,7 +653,7 @@ export class WebSearchSkill implements Skill {
       }
     }
 
-    // Step 4: Compile research report
+
     const report = this.compileResearchReport(topic, queries, allSearchResults, fetchedPages, focusOn);
 
     return {
@@ -686,7 +666,7 @@ export class WebSearchSkill implements Skill {
       rawData: fetchedPages.map(p => ({
         url: p.url,
         title: p.title,
-        content: p.content.slice(0, 6000),
+        content: p.content.slice(0, 2000),
       })),
     };
   }
@@ -696,25 +676,25 @@ export class WebSearchSkill implements Skill {
 
     const topicLower = topic.toLowerCase();
 
-    // Add API-specific queries
-    if (topicLower.includes('api') || topicLower.includes('endpoint') || topicLower.includes('бот') || topicLower.includes('bot')) {
+
+    if (topicLower.includes('api') || topicLower.includes('endpoint') || topicLower.includes('bot')) {
       queries.push(`${topic} REST API documentation`);
       queries.push(`${topic} API endpoints examples`);
     }
 
-    // Add development-specific queries
-    if (topicLower.includes('bot') || topicLower.includes('бот') || topicLower.includes('build') || topicLower.includes('create')) {
+
+    if (topicLower.includes('bot') || topicLower.includes('build') || topicLower.includes('create')) {
       queries.push(`${topic} tutorial guide`);
       queries.push(`${topic} github example code`);
     }
 
-    // Add integration queries
+
     if (topicLower.includes('pump') || topicLower.includes('jupiter') || topicLower.includes('raydium') || topicLower.includes('solana')) {
       queries.push(`${topic} API integration typescript`);
       queries.push(`${topic} SDK npm package`);
     }
 
-    // General supplementary query
+
     queries.push(`${topic} documentation 2024 2025`);
 
     return queries.slice(0, 5);
@@ -738,7 +718,7 @@ export class WebSearchSkill implements Skill {
         const urlLower = r.url.toLowerCase();
         const titleLower = r.title.toLowerCase();
 
-        // Boost official docs, APIs, GitHub
+
         if (urlLower.includes('docs.') || urlLower.includes('/docs')) score += 5;
         if (urlLower.includes('api.') || urlLower.includes('/api')) score += 5;
         if (urlLower.includes('github.com')) score += 4;
@@ -746,13 +726,13 @@ export class WebSearchSkill implements Skill {
         if (urlLower.includes('developer.') || urlLower.includes('/developer')) score += 4;
         if (urlLower.includes('swagger') || urlLower.includes('openapi') || urlLower.includes('redoc')) score += 5;
 
-        // Boost topic keyword matches
+
         for (const word of topicWords) {
           if (titleLower.includes(word)) score += 2;
           if (urlLower.includes(word)) score += 1;
         }
 
-        // Penalize social/aggregator sites
+
         if (urlLower.includes('reddit.com')) score -= 1;
         if (urlLower.includes('medium.com')) score += 1;
         if (urlLower.includes('stackoverflow.com')) score += 2;
@@ -778,14 +758,14 @@ export class WebSearchSkill implements Skill {
     lines.push(`## Key Findings`);
     lines.push('');
 
-    // Compile relevant content from fetched pages
+
     for (const page of pages) {
       lines.push(`### ${page.title || page.source}`);
       lines.push(`Source: ${page.url}`);
       lines.push('');
 
       let content = page.content;
-      // If focus filter provided, try to extract relevant sections
+
       if (focusOn) {
         const focusWords = focusOn.toLowerCase().split(/\s+/);
         const contentLines = content.split('\n');
@@ -798,13 +778,13 @@ export class WebSearchSkill implements Skill {
         }
       }
 
-      lines.push(content.slice(0, 4000));
+      lines.push(content.slice(0, 2000));
       lines.push('');
       lines.push('---');
       lines.push('');
     }
 
-    // Add unvisited but relevant search results
+
     const visitedUrls = new Set(pages.map(p => p.url));
     const unvisited = searchResults.filter(r => !visitedUrls.has(r.url)).slice(0, 10);
     if (unvisited.length > 0) {
@@ -818,9 +798,6 @@ export class WebSearchSkill implements Skill {
     return lines.join('\n');
   }
 
-  // =====================================================
-  // Extract API documentation
-  // =====================================================
 
   private async extractApiDocs(url: string, apiName?: string): Promise<any> {
     if (!url || !/^https?:\/\//i.test(url)) {
@@ -830,7 +807,7 @@ export class WebSearchSkill implements Skill {
     const name = apiName || new URL(url).hostname;
     this.logger.info(`[extract_api_docs] Extracting API docs from: ${url} (${name})`);
 
-    // Step 1: Fetch main page
+
     const mainPage = await this.browserFetch(url, undefined, 20000);
     if (mainPage.error) {
       return { error: mainPage.error, url };
@@ -849,8 +826,7 @@ export class WebSearchSkill implements Skill {
     const content = mainPage.content || '';
     const contentLower = content.toLowerCase();
 
-    // Step 2: Extract API endpoints from text
-    // Pattern: HTTP Method + Path
+
     const endpointPatterns = [
       /(?:GET|POST|PUT|DELETE|PATCH)\s+(\/[a-zA-Z0-9\/_\-{}:.?&=]+)/g,
       /(?:endpoint|route|url|path)\s*[:\-=]\s*(\/[a-zA-Z0-9\/_\-{}:.?&=]+)/gi,
@@ -874,15 +850,12 @@ export class WebSearchSkill implements Skill {
       };
     });
 
-    // Step 3: Extract base URL
     const baseUrlMatch = content.match(/(?:base\s*url|api\s*url|host|server)[:\s]*(https?:\/\/[^\s,;"'<]+)/i);
     if (baseUrlMatch) result.baseUrl = baseUrlMatch[1];
 
-    // Step 4: Detect WebSocket
     const wsMatch = content.match(/(?:wss?:\/\/[^\s,;"'<]+)/i);
     if (wsMatch) result.websocket = wsMatch[0];
 
-    // Step 5: Extract auth info
     if (contentLower.includes('api key') || contentLower.includes('apikey') || contentLower.includes('x-api-key')) {
       result.authentication = 'API Key';
     } else if (contentLower.includes('bearer') || contentLower.includes('jwt') || contentLower.includes('oauth')) {
@@ -891,7 +864,6 @@ export class WebSearchSkill implements Skill {
       result.authentication = 'Basic Auth';
     }
 
-    // Step 6: Look for OpenAPI/Swagger links on the page
     if (mainPage.links) {
       const apiLinks = mainPage.links.filter((l: any) =>
         l.href.includes('swagger') || l.href.includes('openapi') || l.href.includes('api-docs') ||
@@ -900,7 +872,6 @@ export class WebSearchSkill implements Skill {
       if (apiLinks.length > 0) {
         result.apiDocLinks = apiLinks.slice(0, 10);
 
-        // Try fetching the first Swagger/OpenAPI link
         for (const link of apiLinks.slice(0, 2)) {
           try {
             if (link.href.includes('.json') || link.href.includes('swagger') || link.href.includes('openapi')) {
@@ -910,15 +881,14 @@ export class WebSearchSkill implements Skill {
                 break;
               }
             }
-          } catch { /* skip */ }
+          } catch {  }
         }
       }
     }
 
-    // Step 7: If GitHub URL, try to fetch README and look for API routes in code
     if (url.includes('github.com')) {
       try {
-        // Try raw README
+
         const repoMatch = url.match(/github\.com\/([^/]+\/[^/]+)/);
         if (repoMatch) {
           const rawUrl = `https://raw.githubusercontent.com/${repoMatch[1]}/main/README.md`;
@@ -926,31 +896,27 @@ export class WebSearchSkill implements Skill {
           if (readme.content && readme.content.length > 200) {
             result.readme = readme.content;
           } else {
-            // Try master branch
+
             const rawUrlMaster = `https://raw.githubusercontent.com/${repoMatch[1]}/master/README.md`;
             const readmeMaster = await this.fetchUrl(rawUrlMaster, 15000);
             if (readmeMaster.content) result.readme = readmeMaster.content;
           }
         }
-      } catch { /* skip */ }
+      } catch {  }
     }
 
     return result;
   }
 
-  // =====================================================
-  // Helpers
-  // =====================================================
-
   private cleanUrl(url: string): string {
-    // DDG sometimes wraps URLs — handle //duckduckgo.com/l/?uddg=<encoded_url>
+
     if (url.includes('uddg=')) {
       const match = url.match(/uddg=([^&]+)/);
       if (match) {
-        try { return decodeURIComponent(match[1]); } catch { /* ignore */ }
+        try { return decodeURIComponent(match[1]); } catch {  }
       }
     }
-    // Handle relative //url format
+
     if (url.startsWith('//')) return 'https:' + url;
     return url;
   }
@@ -974,7 +940,7 @@ export class WebSearchSkill implements Skill {
   }
 
   private extractReadableText(html: string): string {
-    // Remove scripts, styles, svg, noscript
+
     let text = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -984,16 +950,13 @@ export class WebSearchSkill implements Skill {
       .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
       .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '');
 
-    // Convert block elements to newlines
     text = text
       .replace(/<\/(p|div|h[1-6]|li|tr|br|blockquote|section|article)>/gi, '\n')
       .replace(/<(br|hr)\s*\/?>/gi, '\n')
       .replace(/<li[^>]*>/gi, '- ');
 
-    // Strip remaining tags
     text = this.stripHtml(text);
 
-    // Clean up whitespace
     text = text
       .split('\n')
       .map(line => line.trim())

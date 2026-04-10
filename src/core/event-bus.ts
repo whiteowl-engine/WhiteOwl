@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { EventMap, EventName, EventBusInterface } from '../types';
+import { EventMap, EventName, EventBusInterface } from '../types.ts';
 
 interface HistoryEntry {
   event: EventName;

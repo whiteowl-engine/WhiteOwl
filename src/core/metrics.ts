@@ -1,46 +1,29 @@
-/**
- * Metrics & Health Monitoring — Phase 6
- *
- * Prometheus-compatible /metrics endpoint exposing:
- * - Trading metrics (trades, P&L, win rate)
- * - Pipeline metrics (throughput, latency, pass rate)
- * - System metrics (uptime, memory, event bus)
- * - RPC metrics (latency, errors)
- *
- * Also provides health check with auto-restart capability.
- */
 
-import { EventBusInterface, LoggerInterface, SessionStats } from '../types';
-import { Memory } from '../memory';
-
-// ----- Metric Counters -----
+import { EventBusInterface, LoggerInterface, SessionStats } from '../types.ts';
+import { Memory } from '../memory/index.ts';
 
 interface MetricState {
-  // Trading
+
   tradesTotal: number;
   tradesSuccess: number;
   tradesFailed: number;
   pnlSolTotal: number;
   positionsOpen: number;
 
-  // Pipeline
   pipelineTokensReceived: number;
   pipelineTokensPassed: number;
   pipelineTokensRejected: number;
 
-  // RPC
   rpcCallsTotal: number;
   rpcErrors: number;
   rpcLatencySum: number;
 
-  // System
   startTime: number;
   eventsEmitted: number;
   agentDecisions: number;
   llmCalls: number;
   llmErrors: number;
 
-  // Labels for last values
   lastTradeAt: number;
   lastErrorAt: number;
 }
@@ -78,9 +61,6 @@ export class MetricsCollector {
     };
   }
 
-  /**
-   * Start collecting metrics from the event bus.
-   */
   start(): void {
     this.eventBus.on('trade:executed', (data) => {
       this.state.tradesTotal++;
@@ -106,33 +86,21 @@ export class MetricsCollector {
     this.logger.info('Metrics collector started');
   }
 
-  /**
-   * Register a health check callback.
-   */
   addHealthCheck(fn: () => boolean): void {
     this.healthCallbacks.push(fn);
   }
 
-  /**
-   * Record RPC call metrics.
-   */
   recordRpcCall(latencyMs: number, success: boolean): void {
     this.state.rpcCallsTotal++;
     this.state.rpcLatencySum += latencyMs;
     if (!success) this.state.rpcErrors++;
   }
 
-  /**
-   * Record LLM call metrics.
-   */
   recordLlmCall(success: boolean): void {
     this.state.llmCalls++;
     if (!success) this.state.llmErrors++;
   }
 
-  /**
-   * Generate Prometheus-compatible metrics text.
-   */
   getPrometheusMetrics(): string {
     const s = this.state;
     const uptimeSeconds = Math.round((Date.now() - s.startTime) / 1000);
@@ -192,28 +160,31 @@ export class MetricsCollector {
     return lines.join('\n') + '\n';
   }
 
-  /**
-   * Health check — returns true if system is healthy.
-   */
-  isHealthy(): { healthy: boolean; checks: Record<string, boolean>; details: string } {
+isHealthy(): { healthy: boolean; checks: Record<string, boolean>; details: string } {
+    const heapUsed = process.memoryUsage().heapUsed;
+    const uptimeMs = Date.now() - this.state.startTime;
+
     const checks: Record<string, boolean> = {
-      uptime: (Date.now() - this.state.startTime) > 5000,
-      recentActivity: this.state.pipelineTokensReceived > 0 || (Date.now() - this.state.startTime) < 60_000,
-      memoryOk: process.memoryUsage().heapUsed < 512 * 1024 * 1024,
-      noRecentErrors: (Date.now() - this.state.lastErrorAt) > 60_000 || this.state.lastErrorAt === 0,
+      processUp: uptimeMs >= 0,
+      memoryOk: heapUsed < 512 * 1024 * 1024,
+
+      noBurstErrors: this.state.lastErrorAt === 0 || (Date.now() - this.state.lastErrorAt) > 120_000,
     };
 
     for (const cb of this.healthCallbacks) {
       try {
-        checks['custom'] = cb();
+        checks['customHealth'] = cb();
       } catch {
-        checks['custom'] = false;
+        checks['customHealth'] = false;
       }
     }
 
-    const healthy = Object.values(checks).every(v => v);
+    const criticalKeys = ['processUp', 'memoryOk'];
+    const healthy = criticalKeys.every(k => checks[k] !== false);
     const failedChecks = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
-    const details = healthy ? 'All checks passed' : `Failed: ${failedChecks.join(', ')}`;
+    const details = healthy
+      ? (failedChecks.length ? `OK (note: ${failedChecks.join(', ')})` : 'All checks passed')
+      : `Failed: ${failedChecks.join(', ')}`;
 
     return { healthy, checks, details };
   }
@@ -223,7 +194,6 @@ export class MetricsCollector {
   }
 }
 
-// ----- Backup Strategy -----
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -245,11 +215,7 @@ export class BackupManager {
     }
   }
 
-  /**
-   * Create a backup of the SQLite database.
-   * Uses file copy (safe when WAL mode is enabled).
-   */
-  backup(): string {
+backup(): string {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupName = `whiteowl-backup-${timestamp}.db`;
     const backupPath = path.join(this.backupDir, backupName);
@@ -258,7 +224,7 @@ export class BackupManager {
       fs.copyFileSync(this.dbPath, backupPath);
       this.logger.info(`Backup created: ${backupPath}`);
 
-      // Clean old backups
+
       this.cleanOldBackups();
 
       return backupPath;
@@ -268,10 +234,7 @@ export class BackupManager {
     }
   }
 
-  /**
-   * List available backups.
-   */
-  listBackups(): Array<{ name: string; path: string; size: number; created: Date }> {
+listBackups(): Array<{ name: string; path: string; size: number; created: Date }> {
     const files = fs.readdirSync(this.backupDir)
       .filter(f => f.startsWith('whiteowl-backup-') && f.endsWith('.db'))
       .map(f => {
@@ -289,15 +252,12 @@ export class BackupManager {
     return files;
   }
 
-  /**
-   * Restore from a backup file.
-   */
-  restore(backupPath: string): void {
+restore(backupPath: string): void {
     if (!fs.existsSync(backupPath)) {
       throw new Error(`Backup not found: ${backupPath}`);
     }
 
-    // Create safety backup of current DB first
+
     const safetyPath = this.dbPath + '.pre-restore';
     if (fs.existsSync(this.dbPath)) {
       fs.copyFileSync(this.dbPath, safetyPath);

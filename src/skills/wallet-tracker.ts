@@ -1,7 +1,7 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface, MemoryInterface,
-} from '../types';
+} from '../types.ts';
 
 interface TrackedWallet {
   address: string;
@@ -122,7 +122,7 @@ export class WalletTrackerSkill implements Skill {
   private memory!: MemoryInterface;
   private tracked = new Map<string, TrackedWallet>();
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
-  private lastSeen = new Map<string, string>(); // address → last signature
+  private lastSeen = new Map<string, string>();
   private solanaRpc = '';
   private heliusKey = '';
 
@@ -182,7 +182,7 @@ export class WalletTrackerSkill implements Skill {
       }
 
       const res = await fetch(this.solanaRpc, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,
@@ -257,7 +257,7 @@ export class WalletTrackerSkill implements Skill {
   private async getWalletHoldings(address: string): Promise<any> {
     try {
       const res = await fetch(this.solanaRpc, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,
@@ -288,7 +288,7 @@ export class WalletTrackerSkill implements Skill {
 
   private async findCommonBuys(minWallets: number = 2, hoursBack: number = 24): Promise<any> {
     const sinceMs = Date.now() - hoursBack * 3_600_000;
-    const tokenBuyers = new Map<string, Set<string>>(); // mint → set of addresses
+    const tokenBuyers = new Map<string, Set<string>>();
 
     for (const [address] of this.tracked) {
       const activity = await this.getWalletActivity(address, 50);
@@ -321,10 +321,10 @@ export class WalletTrackerSkill implements Skill {
   private startTracking(): { status: string } {
     if (this.pollingTimer) return { status: 'already_running' };
 
-    const interval = this.heliusKey ? 15_000 : 30_000; // Faster polling with Helius
+    const interval = this.heliusKey ? 15_000 : 30_000;
 
     this.pollingTimer = setInterval(() => this.pollAllWallets(), interval);
-    this.pollAllWallets(); // Immediate first check
+    this.pollAllWallets();
     this.logger.info(`Live wallet tracking started (${this.tracked.size} wallets, ${interval / 1000}s interval)`);
     return { status: 'started' };
   }
@@ -341,7 +341,7 @@ export class WalletTrackerSkill implements Skill {
     for (const [address, wallet] of this.tracked) {
       try {
         const res = await fetch(this.solanaRpc, {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jsonrpc: '2.0', id: 1,
@@ -359,7 +359,7 @@ export class WalletTrackerSkill implements Skill {
 
         if (!lastKnown) continue;
 
-        // Find new transactions
+
         const newSigs = [];
         for (const sig of sigs) {
           if (sig.signature === lastKnown) break;
@@ -367,7 +367,7 @@ export class WalletTrackerSkill implements Skill {
         }
 
         if (newSigs.length > 0 && this.heliusKey) {
-          // Fetch all new transactions in one call
+
           const activity = await this.getActivityViaHelius(address, newSigs.length);
           const sigSet = new Set(newSigs.map((s: any) => s.signature));
 

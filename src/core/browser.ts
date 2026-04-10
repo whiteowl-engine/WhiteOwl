@@ -1,6 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// Browser evaluate() callbacks run in Chromium context (DOM available)
-/// <reference lib="dom" />
+
 import puppeteer, { Browser, Page } from 'puppeteer';
 import path from 'path';
 import fs from 'fs';
@@ -9,26 +7,35 @@ export interface BrowserStatus {
   running: boolean;
   twitterLoggedIn: boolean;
   loginWindowOpen: boolean;
+  mainBrowserConnected: boolean;
+  axiomConnected: boolean;
+  gmgnConnected: boolean;
 }
 
-/**
- * BrowserService — headless/visible browser for authenticated web browsing.
- * Uses persistent user data directory to maintain login sessions across restarts.
- * Twitter login: opens visible Chrome → user logs in → session auto-saved in profile.
- * Content fetch: headless Chrome with saved session navigates to pages.
- */
 export class BrowserService {
   private browser: Browser | null = null;
   private loginBrowser: Browser | null = null;
+  private mainBrowser: Browser | null = null;
   private userDataDir: string;
   private logger: any;
   private twitterLoggedIn = false;
   private loginWindowOpen = false;
+  private axiomConnected = false;
+  private gmgnConnected = false;
+  private static CDP_HOST = '127.0.0.1';
+
+  private axiomCookies: { name: string; value: string; domain: string; path: string; httpOnly: boolean; secure: boolean }[] = [];
+  private axiomCookiesUpdatedAt = 0;
+  private axiomAccessTokenRefreshedAt = 0;
+
+  private axiomAuthHeaders: Record<string, string> = {};
+  private axiomAuthHeadersUpdatedAt = 0;
+  private axiomCdpCookieTimer: ReturnType<typeof setInterval> | null = null;
+  private cdpReconnectTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(dataDir: string, logger: any) {
     this.userDataDir = path.join(dataDir, 'browser-profile');
     this.logger = logger;
-    // Ensure directory exists
     if (!fs.existsSync(this.userDataDir)) {
       fs.mkdirSync(this.userDataDir, { recursive: true });
     }
@@ -39,14 +46,355 @@ export class BrowserService {
       running: !!(this.browser?.connected),
       twitterLoggedIn: this.twitterLoggedIn,
       loginWindowOpen: this.loginWindowOpen,
+      mainBrowserConnected: !!(this.mainBrowser?.connected),
+      axiomConnected: this.axiomConnected && !!(this.mainBrowser?.connected) || this.hasAxiomCookies() || this.hasAxiomAuthHeaders(),
+      gmgnConnected: this.gmgnConnected && !!(this.mainBrowser?.connected),
     };
   }
 
-  /**
-   * Launch headless browser with persistent profile (reuses login sessions).
-   */
-  private async getHeadlessBrowser(): Promise<Browser> {
-    // Don't launch headless if login window is using the profile
+  setAxiomCookies(cookies: { name: string; value: string; domain: string; path: string; httpOnly: boolean; secure: boolean }[]) {
+    this.axiomCookies = cookies;
+    this.axiomCookiesUpdatedAt = Date.now();
+    const hasAuth = cookies.some(c => c.name === 'auth-access-token' || c.name === 'auth-refresh-token');
+    if (hasAuth) {
+      this.axiomConnected = true;
+      this.logger.info(`[Browser] Axiom cookies synced from extension (${cookies.length} cookies, auth ✓)`);
+    }
+  }
+
+setAxiomAuthHeaders(headers: Record<string, string>) {
+    this.axiomAuthHeaders = headers;
+    this.axiomAuthHeadersUpdatedAt = Date.now();
+
+    if (headers.cookie) {
+      const pairs = headers.cookie.split(';').map(s => s.trim());
+      for (const pair of pairs) {
+        const eqIdx = pair.indexOf('=');
+        if (eqIdx < 0) continue;
+        const name = pair.substring(0, eqIdx);
+        const value = pair.substring(eqIdx + 1);
+        const existing = this.axiomCookies.find(c => c.name === name);
+        if (existing) {
+          existing.value = value;
+        } else {
+          this.axiomCookies.push({ name, value, domain: '.axiom.trade', path: '/', httpOnly: false, secure: true });
+        }
+      }
+      this.axiomCookiesUpdatedAt = Date.now();
+    }
+    this.axiomConnected = true;
+    this.logger.info(`[Browser] Axiom auth headers captured from browser (keys: ${Object.keys(headers).join(', ')})`);
+  }
+
+hasAxiomAuthHeaders(): boolean {
+    return Object.keys(this.axiomAuthHeaders).length > 0 && (Date.now() - this.axiomAuthHeadersUpdatedAt < 300_000);
+  }
+
+hasAxiomCookies(): boolean {
+    const hasAuth = this.axiomCookies.some(c => c.name === 'auth-access-token' || c.name === 'auth-refresh-token');
+    return hasAuth && (Date.now() - this.axiomCookiesUpdatedAt < 300_000);
+  }
+
+private getAxiomCookieHeader(): string {
+    return this.axiomCookies.map(c => `${c.name}=${c.value}`).join('; ');
+  }
+
+private async ensureAxiomAccessToken(): Promise<void> {
+
+    const hasAccess = this.axiomCookies.some(c => c.name === 'auth-access-token');
+    if (hasAccess && Date.now() - this.axiomAccessTokenRefreshedAt < 240_000) return;
+
+    const refreshCookie = this.axiomCookies.find(c => c.name === 'auth-refresh-token');
+    if (!refreshCookie) return;
+
+    try {
+            const resp = await fetch('https://api.axiom.trade/refresh-token', {
+                method: 'POST',
+        headers: {
+          'Cookie': `auth-refresh-token=${refreshCookie.value}`,
+          'Referer': 'https://axiom.trade/',
+          'Origin': 'https://axiom.trade',
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+        },
+      });
+      if (!resp.ok) {
+        this.logger.warn(`[Browser] Axiom token refresh failed: ${resp.status}`);
+        return;
+      }
+
+      const setCookies = resp.headers.getSetCookie?.() || [];
+      for (const sc of setCookies) {
+        const match = sc.match(/^([^=]+)=([^;]*)/);
+        if (match) {
+          const [, name, value] = match;
+          const existing = this.axiomCookies.find(c => c.name === name);
+          if (existing) {
+            existing.value = value;
+          } else {
+            this.axiomCookies.push({
+              name,
+              value,
+              domain: '.axiom.trade',
+              path: '/',
+              httpOnly: name.startsWith('auth-'),
+              secure: true,
+            });
+          }
+        }
+      }
+
+      try {
+        const body = await resp.json();
+        if (body?.accessToken) {
+          const existing = this.axiomCookies.find(c => c.name === 'auth-access-token');
+          if (existing) {
+            existing.value = body.accessToken;
+          } else {
+            this.axiomCookies.push({
+              name: 'auth-access-token',
+              value: body.accessToken,
+              domain: '.axiom.trade',
+              path: '/',
+              httpOnly: true,
+              secure: true,
+            });
+          }
+        }
+      } catch {}
+      this.axiomAccessTokenRefreshedAt = Date.now();
+      this.logger.debug(`[Browser] Axiom access token refreshed (cookies: ${this.axiomCookies.map(c => c.name).join(', ')})`);
+    } catch (err: any) {
+      this.logger.warn(`[Browser] Axiom token refresh error: ${err.message}`);
+    }
+  }
+
+async captureAxiomCookiesViaCDP(): Promise<boolean> {
+    if (!this.mainBrowser?.connected) return false;
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) {
+
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+
+      const cdp = await page.createCDPSession();
+
+
+      let cookieCaptured = false;
+      try {
+        const { cookies } = await cdp.send('Network.getCookies', {
+          urls: [
+            'https://axiom.trade',
+            'https://api.axiom.trade',
+            'https://api10.axiom.trade',
+            'https://api9.axiom.trade',
+          ],
+        }) as any;
+        if (cookies?.length) {
+          for (const c of cookies) {
+            const existing = this.axiomCookies.find(ec => ec.name === c.name);
+            if (existing) existing.value = c.value;
+            else this.axiomCookies.push({
+              name: c.name, value: c.value,
+              domain: c.domain || '.axiom.trade', path: c.path || '/',
+              httpOnly: c.httpOnly ?? false, secure: c.secure ?? true,
+            });
+          }
+          this.axiomCookiesUpdatedAt = Date.now();
+          const hasAccess = cookies.some((c: any) => c.name === 'auth-access-token');
+          const hasRefresh = cookies.some((c: any) => c.name === 'auth-refresh-token');
+          if (hasAccess || hasRefresh) cookieCaptured = true;
+          this.logger.debug(`[Browser] CDP cookies: ${cookies.map((c: any) => c.name).join(', ')} (access=${hasAccess}, refresh=${hasRefresh})`);
+        }
+      } catch {}
+
+
+      let headersCaptured = false;
+      try {
+        await cdp.send('Network.enable');
+        headersCaptured = await new Promise<boolean>((resolve) => {
+          let done = false;
+          const onRequest = (params: any) => {
+            if (done) return;
+            const url: string = params.request?.url || '';
+            if (url.includes('axiom.trade/') && (url.includes('/api') || url.includes('api.axiom') || url.includes('api10.axiom') || url.includes('api9.axiom'))) {
+              const reqHeaders = params.request?.headers || {};
+              const cookie = reqHeaders['Cookie'] || reqHeaders['cookie'] || '';
+              const auth = reqHeaders['Authorization'] || reqHeaders['authorization'] || '';
+              if (cookie || auth) {
+                done = true;
+                cdp.off('Network.requestWillBeSent', onRequest);
+
+                const captured: Record<string, string> = {};
+                if (cookie) captured.cookie = cookie;
+                if (auth) captured.authorization = auth;
+                this.axiomAuthHeaders = captured;
+                this.axiomAuthHeadersUpdatedAt = Date.now();
+
+                if (cookie) {
+                  for (const pair of cookie.split(';')) {
+                    const [name, ...rest] = pair.trim().split('=');
+                    if (!name) continue;
+                    const value = rest.join('=');
+                    const existing = this.axiomCookies.find(c => c.name === name);
+                    if (existing) existing.value = value;
+                    else this.axiomCookies.push({
+                      name, value, domain: '.axiom.trade', path: '/',
+                      httpOnly: name.startsWith('auth-'), secure: true,
+                    });
+                  }
+                  this.axiomCookiesUpdatedAt = Date.now();
+                }
+                this.logger.info(`[Browser] ✓ Axiom auth headers intercepted via CDP (cookie=${cookie.length}ch, auth=${auth ? 'yes' : 'no'})`);
+                resolve(true);
+              }
+            }
+          };
+          cdp.on('Network.requestWillBeSent', onRequest);
+
+          page!.evaluate(`(async () => {
+            try { await fetch('https://api.axiom.trade/lighthouse?v=' + Date.now(), { credentials: 'include' }); } catch {}
+          })()`).catch(() => {});
+
+          setTimeout(() => {
+            if (!done) {
+              done = true;
+              cdp.off('Network.requestWillBeSent', onRequest);
+              resolve(false);
+            }
+          }, 5000);
+        });
+      } catch (err: any) {
+        this.logger.debug(`[Browser] CDP header intercept failed: ${err.message}`);
+      }
+
+      try { await cdp.send('Network.disable').catch(() => {}); } catch {}
+      await cdp.detach().catch(() => {});
+
+
+      if (created && !headersCaptured && !cookieCaptured && page) {
+        await page.close().catch(() => {});
+      }
+
+      const hasAccess = this.axiomCookies.some(c => c.name === 'auth-access-token');
+      if (headersCaptured || cookieCaptured) {
+        this.logger.info(`[Browser] ✓ Axiom CDP auth captured: headers=${headersCaptured}, cookies=${cookieCaptured}, accessToken=${hasAccess}`);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      this.logger.debug(`[Browser] captureAxiomCookiesViaCDP failed: ${err.message}`);
+      if (created && page) try { await page.close(); } catch {}
+      return false;
+    }
+  }
+
+startAxiomCookieRefresh(): void {
+    if (this.axiomCdpCookieTimer) return;
+
+    this.captureAxiomCookiesViaCDP().catch(() => {});
+    this.axiomCdpCookieTimer = setInterval(() => {
+      if (this.mainBrowser?.connected) {
+        this.captureAxiomCookiesViaCDP().catch(() => {});
+      }
+    }, 60_000);
+    this.logger.info('[Browser] Axiom CDP cookie refresh started (every 60s)');
+  }
+
+  stopAxiomCookieRefresh(): void {
+    if (this.axiomCdpCookieTimer) {
+      clearInterval(this.axiomCdpCookieTimer);
+      this.axiomCdpCookieTimer = null;
+    }
+  }
+
+startCdpReconnectLoop(): void {
+    if (this.cdpReconnectTimer) return;
+    this.cdpReconnectTimer = setInterval(async () => {
+
+      if (this.mainBrowser?.connected) {
+        this.stopCdpReconnectLoop();
+        return;
+      }
+      try {
+        const detect = await this.detectMainBrowser();
+        if (!detect.available || !detect.wsEndpoint) return;
+
+        this.mainBrowser = await (await import('puppeteer')).default.connect({
+          browserWSEndpoint: detect.wsEndpoint,
+          defaultViewport: null,
+        });
+        this.mainBrowser.on('disconnected', () => {
+          this.mainBrowser = null;
+          this.axiomConnected = false;
+          this.gmgnConnected = false;
+          this.stopAxiomCookieRefresh();
+          this.logger.info('[Browser] Main browser disconnected — will retry CDP in background');
+
+          this.startCdpReconnectLoop();
+        });
+
+        this.axiomConnected = true;
+        this.gmgnConnected = true;
+        this.logger.info(`[Browser] ✓ CDP auto-reconnected to Chrome (${detect.browser})`);
+
+
+        this.extractMainBrowserTwitterCookies().catch(() => {});
+
+
+        this.startAxiomCookieRefresh();
+
+
+        this.stopCdpReconnectLoop();
+      } catch (err: any) {
+        this.logger.debug(`[Browser] CDP reconnect attempt failed: ${err.message}`);
+      }
+    }, 15_000);
+    this.logger.info('[Browser] CDP reconnect loop started (every 15s)');
+  }
+
+  stopCdpReconnectLoop(): void {
+    if (this.cdpReconnectTimer) {
+      clearInterval(this.cdpReconnectTimer);
+      this.cdpReconnectTimer = null;
+    }
+  }
+
+async axiomDirectFetch(url: string): Promise<any> {
+
+    const hdrs: Record<string, string> = {
+      'Referer': 'https://axiom.trade/',
+      'Origin': 'https://axiom.trade',
+      'Accept': 'application/json, text/plain, */*',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+    };
+    if (this.hasAxiomAuthHeaders()) {
+
+      if (this.axiomAuthHeaders.cookie) hdrs['Cookie'] = this.axiomAuthHeaders.cookie;
+      if (this.axiomAuthHeaders.authorization) hdrs['Authorization'] = this.axiomAuthHeaders.authorization;
+    } else {
+
+      await this.ensureAxiomAccessToken();
+      hdrs['Cookie'] = this.getAxiomCookieHeader();
+    }
+
+    const resp = await fetch(url, { headers: hdrs });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      this.logger.warn(`[Browser] axiomDirectFetch ${resp.status} for ${url.split('?')[0]} — ${body.slice(0, 200)}`);
+      return null;
+    }
+    return resp.json();
+  }
+
+private async getHeadlessBrowser(): Promise<Browser> {
+
     if (this.loginWindowOpen) {
       throw new Error('Login window is open — close it first before fetching content');
     }
@@ -61,19 +409,35 @@ export class BrowserService {
         '--disable-dev-shm-usage',
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled',
       ],
+      ignoreDefaultArgs: ['--enable-automation'],
     });
     this.browser.on('disconnected', () => { this.browser = null; });
     return this.browser;
   }
 
-  /**
-   * Open a VISIBLE browser window for user to log into Twitter.
-   * The user data dir persists cookies, so login survives across restarts.
-   */
-  async openTwitterLogin(): Promise<{ success: boolean; message: string }> {
+private async injectTwitterCookies(page: Page): Promise<void> {
+    const raw = process.env.TWITTER_COOKIES;
+    if (!raw) return;
+    const cookies: { name: string; value: string; domain: string; path: string; httpOnly: boolean; secure: boolean }[] = [];
+    for (const part of raw.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq < 1) continue;
+      const name = part.slice(0, eq).trim();
+      const value = part.slice(eq + 1).trim();
+      if (name && value) {
+        cookies.push({ name, value, domain: '.x.com', path: '/', httpOnly: true, secure: true });
+      }
+    }
+    if (cookies.length > 0) {
+      await page.setCookie(...cookies);
+    }
+  }
+
+async openTwitterLogin(): Promise<{ success: boolean; message: string }> {
     try {
-      // Close headless browser if running (can't share profile)
+
       await this.closeHeadless();
 
       if (this.loginBrowser?.connected) {
@@ -90,18 +454,46 @@ export class BrowserService {
           '--start-maximized',
           '--no-first-run',
           '--no-default-browser-check',
+
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--flag-switches-begin',
+          '--flag-switches-end',
         ],
+        ignoreDefaultArgs: ['--enable-automation'],
       });
 
-      const page = await this.loginBrowser.newPage();
+      const pages = await this.loginBrowser.pages();
+      const page = pages[0] || await this.loginBrowser.newPage();
+
+
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
+
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en', 'ru'],
+        });
+
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters: any) =>
+          parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
+            : originalQuery(parameters);
+      });
+
       await page.goto('https://x.com/login', { waitUntil: 'networkidle2', timeout: 30000 });
 
       this.logger.info('[Browser] Login window opened — waiting for user to log in');
 
-      // Monitor for successful login (URL changes from /login to /home)
+
       this.monitorLogin(page);
 
-      // Handle browser close
+
       this.loginBrowser.on('disconnected', () => {
         this.loginWindowOpen = false;
         this.loginBrowser = null;
@@ -116,13 +508,9 @@ export class BrowserService {
     }
   }
 
-  /**
-   * Monitor the login page — when URL changes from /login, login is complete.
-   * Also extracts cookies and saves them as TWITTER_COOKIES env var for API fallback.
-   */
-  private async monitorLogin(page: Page): Promise<void> {
+private async monitorLogin(page: Page): Promise<void> {
     try {
-      // Poll URL every 2 seconds
+
       const checkInterval = setInterval(async () => {
         try {
           if (!page || page.isClosed()) {
@@ -135,10 +523,10 @@ export class BrowserService {
             this.twitterLoggedIn = true;
             this.logger.info('[Browser] Twitter login detected!');
 
-            // Extract cookies for API fallback
+
             await this.extractAndSaveTwitterCookies(page);
 
-            // Auto-close after short delay
+
             setTimeout(async () => {
               try {
                 if (this.loginBrowser?.connected) {
@@ -154,7 +542,7 @@ export class BrowserService {
         }
       }, 2000);
 
-      // Timeout after 5 minutes
+
       setTimeout(() => {
         clearInterval(checkInterval);
         if (this.loginBrowser?.connected) {
@@ -167,10 +555,7 @@ export class BrowserService {
     } catch {}
   }
 
-  /**
-   * Extract auth_token and ct0 from browser cookies and save to env.
-   */
-  private async extractAndSaveTwitterCookies(page: Page): Promise<void> {
+private async extractAndSaveTwitterCookies(page: Page): Promise<void> {
     try {
       const cookies = await page.cookies('https://x.com');
       const authToken = cookies.find(c => c.name === 'auth_token')?.value;
@@ -179,24 +564,39 @@ export class BrowserService {
       if (authToken && ct0) {
         const cookieStr = `auth_token=${authToken}; ct0=${ct0}`;
         process.env.TWITTER_COOKIES = cookieStr;
-        this.logger.info('[Browser] Twitter cookies extracted and saved');
+        this.logger.info('[Browser] Twitter cookies extracted and saved to env');
+
+
+        try {
+          const { getRuntime } = require('../runtime');
+          const runtime = getRuntime?.();
+          if (runtime?.setTwitterCookies) {
+            runtime.setTwitterCookies(cookieStr);
+            this.logger.info('[Browser] Twitter cookies persisted to disk');
+          }
+        } catch {}
+      } else {
+        this.logger.warn('[Browser] Could not find auth_token or ct0 in cookies');
+
+        if (authToken) {
+          process.env.TWITTER_COOKIES = `auth_token=${authToken}`;
+          this.logger.info('[Browser] Partial cookies saved (auth_token only, ct0 missing)');
+        }
       }
     } catch (err: any) {
       this.logger.warn('[Browser] Failed to extract cookies:', err.message);
     }
   }
 
-  /**
-   * Check if Twitter session is active by navigating to home.
-   */
-  async checkTwitterLogin(): Promise<boolean> {
+async checkTwitterLogin(): Promise<boolean> {
     try {
       const browser = await this.getHeadlessBrowser();
       const page = await browser.newPage();
+      await this.injectTwitterCookies(page);
       await page.goto('https://x.com/home', { waitUntil: 'networkidle2', timeout: 15000 });
       const url = page.url();
       const loggedIn = !url.includes('/login') && !url.includes('/i/flow/login');
-      
+
       if (loggedIn) {
         await this.extractAndSaveTwitterCookies(page);
         this.twitterLoggedIn = true;
@@ -211,32 +611,34 @@ export class BrowserService {
     }
   }
 
-  /**
-   * Fetch a tweet via headless browser — returns structured tweet data.
-   */
-  async fetchTweet(tweetUrl: string): Promise<any> {
+async fetchTweet(tweetUrl: string): Promise<any> {
     const browser = await this.getHeadlessBrowser();
     const page = await browser.newPage();
 
     try {
+
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+      await this.injectTwitterCookies(page);
       await page.setViewport({ width: 1280, height: 900 });
       await page.goto(tweetUrl, { waitUntil: 'networkidle2', timeout: 20000 });
 
-      // Check for login redirect
+
       if (page.url().includes('/login') || page.url().includes('/i/flow/login')) {
         await page.close();
         this.twitterLoggedIn = false;
         return { error: 'Not logged into Twitter. Use the login button in settings first.' };
       }
 
-      // Wait for tweet content to render
+
       await page.waitForSelector('[data-testid="tweetText"], [data-testid="tweet"]', { timeout: 10000 });
 
-      // Small delay for engagement counters to load
+
       await new Promise(r => setTimeout(r, 1500));
 
       const tweetData = await page.evaluate(() => {
-        // Helper: parse engagement number from aria-label like "123 Likes" or text
+
         const parseNum = (text: string | null): number => {
           if (!text) return 0;
           const m = text.match(/([\d,.]+[KkMm]?)/);
@@ -247,11 +649,11 @@ export class BrowserService {
           return parseInt(s) || 0;
         };
 
-        // Tweet text
+
         const tweetTextEl = document.querySelector('article [data-testid="tweetText"]');
         const fullText = tweetTextEl?.textContent || '';
 
-        // Author info from the first article (main tweet)
+
         const article = document.querySelector('article[data-testid="tweet"]');
         let displayName = '';
         let username = '';
@@ -265,17 +667,17 @@ export class BrowserService {
               const text = span.textContent || '';
               if (text.startsWith('@')) username = text.slice(1);
             });
-            // Display name is usually the first meaningful span
+
             const firstLink = userNameContainer.querySelector('a span');
             if (firstLink) displayName = firstLink.textContent || '';
           }
 
-          // Date/time
+
           const timeEl = article.querySelector('time');
           dateStr = timeEl?.getAttribute('datetime') || timeEl?.textContent || '';
         }
 
-        // Engagement metrics — look for aria-labels on group elements
+
         const getMetric = (testId: string): number => {
           const el = article?.querySelector(`[data-testid="${testId}"]`);
           if (!el) return 0;
@@ -288,12 +690,12 @@ export class BrowserService {
         const retweets = getMetric('retweet');
         const replies = getMetric('reply');
 
-        // Views — often in a separate analytics link
+
         let views = 0;
         const viewsLink = article?.querySelector('a[href*="/analytics"]');
         if (viewsLink) views = parseNum(viewsLink.textContent);
 
-        // Media
+
         const mediaElements: { type: string; url: string }[] = [];
         article?.querySelectorAll('[data-testid="tweetPhoto"] img').forEach(img => {
           const src = img.getAttribute('src');
@@ -304,7 +706,7 @@ export class BrowserService {
           if (src) mediaElements.push({ type: 'video', url: src });
         });
 
-        // Links in tweet
+
         const links: { text: string; url: string }[] = [];
         tweetTextEl?.querySelectorAll('a').forEach(a => {
           const href = a.getAttribute('href') || '';
@@ -314,7 +716,7 @@ export class BrowserService {
           }
         });
 
-        // Quoted tweet
+
         let quotedTweet = null;
         const qtEl = article?.querySelector('[data-testid="quoteTweet"]') ||
                       article?.querySelector('[role="link"][tabindex="0"]');
@@ -345,14 +747,15 @@ export class BrowserService {
     }
   }
 
-  /**
-   * Fetch a Twitter profile via headless browser.
-   */
-  async fetchTwitterProfile(profileUrl: string): Promise<any> {
+async fetchTwitterProfile(profileUrl: string): Promise<any> {
     const browser = await this.getHeadlessBrowser();
     const page = await browser.newPage();
 
     try {
+
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
       await page.setViewport({ width: 1280, height: 900 });
       await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: 20000 });
 
@@ -362,7 +765,7 @@ export class BrowserService {
         return { error: 'Not logged into Twitter. Use the login button in settings first.' };
       }
 
-      // Wait for profile to render
+
       await page.waitForSelector('[data-testid="UserName"], [data-testid="UserDescription"]', { timeout: 10000 });
       await new Promise(r => setTimeout(r, 1500));
 
@@ -377,7 +780,7 @@ export class BrowserService {
           return parseInt(s) || 0;
         };
 
-        // Profile info
+
         const nameEl = document.querySelector('[data-testid="UserName"]');
         let displayName = '';
         let username = '';
@@ -393,7 +796,7 @@ export class BrowserService {
 
         const bio = document.querySelector('[data-testid="UserDescription"]')?.textContent || '';
 
-        // Followers/following
+
         const links = document.querySelectorAll('a[href*="/followers"], a[href*="/following"], a[href*="/verified_followers"]');
         let followers = 0;
         let following = 0;
@@ -404,10 +807,10 @@ export class BrowserService {
           if (href.endsWith('/following')) following = parseNum(text);
         });
 
-        // Verified badge
+
         const verified = !!document.querySelector('[data-testid="icon-verified"]');
 
-        // Recent tweets (first few visible)
+
         const tweets: { text: string; date: string; likes: number; retweets: number }[] = [];
         const articles = document.querySelectorAll('article[data-testid="tweet"]');
         articles.forEach((article, i) => {
@@ -452,9 +855,101 @@ export class BrowserService {
     }
   }
 
-  /**
-   * Generic page fetch — returns text content of any URL.
-   */
+async searchTwitter(query: string, maxResults = 20): Promise<any[]> {
+    const browser = await this.getHeadlessBrowser();
+    const page = await browser.newPage();
+
+    try {
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+      await this.injectTwitterCookies(page);
+      await page.setViewport({ width: 1280, height: 900 });
+
+
+      const searchUrl = `https://x.com/search?q=${encodeURIComponent(query)}&f=top`;
+      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+
+      if (page.url().includes('/login') || page.url().includes('/i/flow/login')) {
+        await page.close();
+        this.twitterLoggedIn = false;
+        return [{ error: 'Not logged into Twitter. Use the login button in settings first.' }];
+      }
+
+      await page.waitForSelector('article[data-testid="tweet"]', { timeout: 10000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+
+      for (let i = 0; i < 3; i++) {
+        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      const results = await page.evaluate((limit: number) => {
+        const parseNum = (text: string | null): number => {
+          if (!text) return 0;
+          const m = text.match(/([\d,.]+[KkMm]?)/);
+          if (!m) return 0;
+          let s = m[1].replace(/,/g, '');
+          if (/[Kk]$/.test(s)) return Math.round(parseFloat(s) * 1000);
+          if (/[Mm]$/.test(s)) return Math.round(parseFloat(s) * 1000000);
+          return parseInt(s) || 0;
+        };
+
+        const tweets: any[] = [];
+        const articles = document.querySelectorAll('article[data-testid="tweet"]');
+        articles.forEach((article, i) => {
+          if (i >= limit) return;
+          const textEl = article.querySelector('[data-testid="tweetText"]');
+          const text = textEl?.textContent || '';
+          if (!text) return;
+
+          let username = '';
+          let displayName = '';
+          const userNameContainer = article.querySelector('[data-testid="User-Name"]');
+          if (userNameContainer) {
+            const spans = userNameContainer.querySelectorAll('span');
+            spans.forEach(span => {
+              const t = span.textContent || '';
+              if (t.startsWith('@')) username = t.slice(1);
+            });
+            const firstLink = userNameContainer.querySelector('a span');
+            if (firstLink) displayName = firstLink.textContent || '';
+          }
+
+          const timeEl = article.querySelector('time');
+          const date = timeEl?.getAttribute('datetime') || timeEl?.textContent || '';
+
+          const getMetric = (testId: string): number => {
+            const el = article.querySelector(`[data-testid="${testId}"]`);
+            if (!el) return 0;
+            return parseNum(el.getAttribute('aria-label') || el.textContent);
+          };
+
+          const tweetLink = article.querySelector('a[href*="/status/"]');
+          const tweetUrl = tweetLink ? 'https://x.com' + tweetLink.getAttribute('href') : '';
+
+          tweets.push({
+            text: text.slice(0, 500),
+            author: { username, displayName },
+            date,
+            likes: getMetric('like'),
+            retweets: getMetric('retweet'),
+            replies: getMetric('reply'),
+            url: tweetUrl,
+          });
+        });
+
+        return tweets;
+      }, maxResults);
+
+      await page.close();
+      return results;
+    } catch (err: any) {
+      try { await page.close(); } catch {}
+      return [{ error: err.message }];
+    }
+  }
+
   async fetchPage(url: string): Promise<{ title: string; text: string; url: string }> {
     const browser = await this.getHeadlessBrowser();
     const page = await browser.newPage();
@@ -464,7 +959,7 @@ export class BrowserService {
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
 
       const result = await page.evaluate(() => {
-        // Remove script/style tags for cleaner text
+
         document.querySelectorAll('script, style, noscript').forEach(el => el.remove());
         return {
           title: document.title || '',
@@ -488,7 +983,732 @@ export class BrowserService {
     }
   }
 
+async detectMainBrowser(): Promise<{ available: boolean; browser?: string; wsEndpoint?: string }> {
+    const host = BrowserService.CDP_HOST;
+
+
+    const dataDirs = [
+      path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data'),
+      path.join(process.env.LOCALAPPDATA || '', 'Google', 'ChromeDebug'),
+    ];
+    for (const chromeUserData of dataDirs) {
+      try {
+        const portFile = path.join(chromeUserData, 'DevToolsActivePort');
+
+      if (fs.existsSync(portFile)) {
+        const content = fs.readFileSync(portFile, 'utf-8').trim();
+        const lines = content.split('\n');
+        if (lines.length >= 2) {
+          const port = parseInt(lines[0].trim(), 10);
+          const wsPath = lines[1].trim();
+          if (port && wsPath.startsWith('/devtools/browser/')) {
+
+
+                        const httpOk = await fetch(`http://${host}:${port}/json/version`, {
+              signal: AbortSignal.timeout(1500),
+            }).then(r => r.ok).catch(() => false);
+            if (httpOk) {
+              const wsEndpoint = `ws://${host}:${port}${wsPath}`;
+              return { available: true, browser: 'Chrome', wsEndpoint };
+            }
+
+            this.logger.debug(`[Browser] DevToolsActivePort found (port ${port}) but HTTP /json/version not available — this is chrome://inspect, not --remote-debugging-port`);
+          }
+        }
+      }
+      } catch {  }
+    }
+
+    const probePorts = [9222, 9229, 9333];
+    for (const port of probePorts) {
+      try {
+                const resp = await fetch(`http://${host}:${port}/json/version`, {
+          signal: AbortSignal.timeout(1500),
+        });
+        if (resp.ok) {
+          const info = await resp.json() as any;
+          if (info.webSocketDebuggerUrl) {
+            return { available: true, browser: info.Browser || 'Chrome', wsEndpoint: info.webSocketDebuggerUrl };
+          }
+        }
+      } catch {  }
+    }
+
+    return { available: false };
+  }
+
+async connectMainBrowser(): Promise<{ success: boolean; message: string; twitterLoggedIn?: boolean }> {
+    try {
+
+      if (this.mainBrowser?.connected) {
+        return { success: true, message: 'Already connected to main browser' };
+      }
+
+
+      const detect = await this.detectMainBrowser();
+      if (!detect.available || !detect.wsEndpoint) {
+
+
+        this.startCdpReconnectLoop();
+        if (this.hasAxiomCookies()) {
+          this.axiomConnected = true;
+          this.logger.info('[Browser] CDP unavailable, cookies via extension. Reconnect loop started — will auto-connect when Chrome opens.');
+          return {
+            success: true,
+            message: 'CDP unavailable — reconnect loop started. Axiom API available via extension cookies. CDP will auto-connect when Chrome starts.'
+          };
+        }
+        return {
+          success: false,
+          message: 'Chrome CDP not available — reconnect loop started. Will auto-connect when Chrome starts with --remote-debugging-port=9222.'
+        };
+      }
+
+      this.mainBrowser = await puppeteer.connect({
+        browserWSEndpoint: detect.wsEndpoint,
+        defaultViewport: null,
+      });
+
+      this.mainBrowser.on('disconnected', () => {
+        this.mainBrowser = null;
+        this.axiomConnected = false;
+        this.gmgnConnected = false;
+        this.stopAxiomCookieRefresh();
+        this.logger.info('[Browser] Main browser disconnected');
+      });
+
+
+      this.axiomConnected = true;
+      this.gmgnConnected = true;
+
+      this.logger.info(`[Browser] Connected to main browser: ${detect.browser} (Axiom + GMGN auto-enabled)`);
+
+
+      const twitterOk = await this.extractMainBrowserTwitterCookies();
+
+
+      this.startAxiomCookieRefresh();
+
+      return {
+        success: true,
+        message: `Connected to ${detect.browser} — all services available` + (twitterOk ? ', Twitter cookies extracted!' : ''),
+        twitterLoggedIn: twitterOk,
+      };
+    } catch (err: any) {
+      this.mainBrowser = null;
+
+      this.startCdpReconnectLoop();
+
+      if (this.hasAxiomCookies()) {
+        this.axiomConnected = true;
+        return { success: true, message: 'CDP failed but Axiom cookies available via extension. Will auto-reconnect CDP.' };
+      }
+      return { success: false, message: err.message };
+    }
+  }
+
+async disconnectMainBrowser(): Promise<void> {
+    this.stopAxiomCookieRefresh();
+    this.stopCdpReconnectLoop();
+    if (this.mainBrowser?.connected) {
+      this.mainBrowser.disconnect();
+    }
+    this.mainBrowser = null;
+    this.axiomConnected = false;
+    this.gmgnConnected = false;
+    this.logger.info('[Browser] Disconnected from main browser (all services)');
+  }
+
+async extractMainBrowserTwitterCookies(): Promise<boolean> {
+    if (!this.mainBrowser?.connected) return false;
+
+    let page: Page | null = null;
+    let createdNewPage = false;
+    try {
+
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => {
+        try { return p.url().includes('x.com') || p.url().includes('twitter.com'); }
+        catch { return false; }
+      }) || null;
+
+      if (!page) {
+
+        page = await this.mainBrowser.newPage();
+        createdNewPage = true;
+        await page.goto('https://x.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+
+
+      const client = await page.createCDPSession();
+      const { cookies } = await client.send('Network.getCookies', { urls: ['https://x.com', 'https://twitter.com'] }) as any;
+      await client.detach();
+
+      const authToken = cookies.find((c: any) => c.name === 'auth_token')?.value;
+      const ct0 = cookies.find((c: any) => c.name === 'ct0')?.value;
+
+      if (createdNewPage && page) {
+        await page.close().catch(() => {});
+      }
+
+      if (authToken && ct0) {
+        const cookieStr = `auth_token=${authToken}; ct0=${ct0}`;
+        process.env.TWITTER_COOKIES = cookieStr;
+        this.twitterLoggedIn = true;
+        this.logger.info('[Browser] Twitter cookies extracted from main browser');
+
+
+        try {
+          const { getRuntime } = require('../runtime');
+          const runtime = getRuntime?.();
+          if (runtime?.setTwitterCookies) {
+            runtime.setTwitterCookies(cookieStr);
+            this.logger.info('[Browser] Twitter cookies persisted to disk');
+          }
+        } catch {}
+
+        return true;
+      } else {
+        this.logger.warn('[Browser] No Twitter auth cookies found in main browser. Are you logged in on x.com?');
+        if (authToken) {
+          process.env.TWITTER_COOKIES = `auth_token=${authToken}`;
+          this.twitterLoggedIn = true;
+          return true;
+        }
+        return false;
+      }
+    } catch (err: any) {
+      this.logger.warn('[Browser] Failed to extract cookies from main browser:', err.message);
+      if (createdNewPage && page) {
+        try { await page.close(); } catch {}
+      }
+      return false;
+    }
+  }
+
+
+async connectAxiom(): Promise<{ success: boolean; message: string; loggedIn?: boolean }> {
+    try {
+      if (!this.mainBrowser?.connected) {
+        const detect = await this.detectMainBrowser();
+        if (!detect.available || !detect.wsEndpoint) {
+          return { success: false, message: 'Chrome not detected. Connect via Main Browser in Twitter section first, or enable chrome://inspect/#remote-debugging' };
+        }
+        this.mainBrowser = await puppeteer.connect({ browserWSEndpoint: detect.wsEndpoint, defaultViewport: null });
+        this.mainBrowser.on('disconnected', () => { this.mainBrowser = null; this.axiomConnected = false; this.gmgnConnected = false; });
+      }
+      const loggedIn = await this.checkAxiomSession();
+      this.axiomConnected = true;
+      return { success: true, message: loggedIn ? 'Axiom connected — session active' : 'Connected. Log into axiom.trade in Chrome, then click Check Session.', loggedIn };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  async disconnectAxiom(): Promise<void> {
+    this.axiomConnected = false;
+    this.logger.info('[Browser] Axiom disconnected');
+  }
+
+  async checkAxiomSession(): Promise<boolean> {
+    if (!this.mainBrowser?.connected) return false;
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+      const loggedIn = await page.evaluate(`(function() {
+        return !!(document.querySelector('[class*="wallet"]') || document.querySelector('[class*="account"]') || document.cookie.indexOf('session') !== -1);
+      })()`);
+      if (created && page) await page.close().catch(() => {});
+      return loggedIn;
+    } catch (err: any) {
+      this.logger.warn('[Browser] Axiom session check failed:', err.message);
+      if (created && page) try { await page.close(); } catch {}
+      return false;
+    }
+  }
+
+async scrapeAxiomToken(mint: string): Promise<any> {
+    if (!this.mainBrowser?.connected) {
+      return { error: 'Chrome not connected. Connect via Settings → Browser first.' };
+    }
+    let page: Page | null = null;
+    try {
+
+      const pairAddr = await this.resolveAxiomPair(mint) || mint;
+      page = await this.mainBrowser.newPage();
+      await page.goto(`https://axiom.trade/meme/${pairAddr}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForSelector('table, [class*="trader"], [class*="holder"]', { timeout: 15000 }).catch(() => {});
+
+      await new Promise(r => setTimeout(r, 3000));
+
+      const data = await page.evaluate(`(function() {
+        var results = { topTraders: [], influencers: [], raw: '' };
+        var rows = document.querySelectorAll('table tbody tr, [class*="trader-row"], [class*="holder-row"]');
+        rows.forEach(function(row) {
+          var cells = row.querySelectorAll('td, [class*="cell"]');
+          var texts = Array.from(cells).map(function(c) { return c.innerText ? c.innerText.trim() : ''; }).filter(Boolean);
+          if (texts.length >= 2) {
+            results.topTraders.push({
+              wallet: texts[0] || '',
+              pnl: texts[1] || '',
+              bought: texts[2] || '',
+              sold: texts[3] || '',
+              extra: texts.slice(4).join(' | '),
+            });
+          }
+        });
+        var badges = document.querySelectorAll('[class*="influencer"], [class*="kol"], [class*="notable"], [class*="smart"]');
+        badges.forEach(function(b) {
+          results.influencers.push(b.innerText ? b.innerText.trim() : '');
+        });
+        results.raw = (document.body && document.body.innerText || '').slice(0, 8000);
+        return results;
+      })()`);
+
+      await page.close().catch(() => {});
+      return { mint, source: 'axiom', ...data };
+    } catch (err: any) {
+      if (page) try { await page.close(); } catch {}
+      return { error: err.message, mint, source: 'axiom' };
+    }
+  }
+
+  async axiomApiFetch(url: string): Promise<any> {
+    if (!this.mainBrowser?.connected) return null;
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+      const result = await page.evaluate(`(async () => {
+        try {
+          const res = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch { return null; }
+      })()`);
+      if (created && page) await page.close().catch(() => {});
+      return result;
+    } catch (err: any) {
+      this.logger.warn(`[Browser] axiomApiFetch failed: ${err.message}`);
+      if (created && page) try { await page.close(); } catch {}
+      return null;
+    }
+  }
+
+
+  private pairAddressCache = new Map<string, { pair: string; ts: number }>();
+  private static PAIR_CACHE_TTL = 5 * 60_000;
+
+async resolveAxiomPair(mint: string): Promise<string | null> {
+
+    if (!this.mainBrowser?.connected) {
+      if (!this.hasAxiomCookies() && !this.hasAxiomAuthHeaders()) return null;
+      return this.resolveAxiomPairDirect(mint);
+    }
+
+    const cached = this.pairAddressCache.get(mint);
+    if (cached && Date.now() - cached.ts < BrowserService.PAIR_CACHE_TTL) return cached.pair;
+
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      this.logger.debug(`[Browser] resolveAxiomPair: found axiom page=${!!page}, pages=${pages.length}`);
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+
+      const pairAddress = await page.evaluate(`(async () => {
+        try {
+          const tokenMint = ${JSON.stringify(mint)};
+          const v = Date.now();
+          var domains = ['api.axiom.trade', 'api10.axiom.trade', 'api9.axiom.trade'];
+          for (var i = 0; i < domains.length; i++) {
+            try {
+              var url = 'https://' + domains[i] + '/search-v4?searchQuery=' + tokenMint + '&isOg=false&isPumpSearch=false&isBonkSearch=false&isBagsSearch=false&isUsd1Search=false&onlyBonded=false&sortBy=trending&v=' + v;
+              var r = await fetch(url, { credentials: 'include' });
+              if (!r.ok) continue;
+              var data = await r.json();
+              if (Array.isArray(data) && data.length > 0) {
+                var match = data.find(function(d) { return d.tokenAddress === tokenMint; });
+                if (match && match.pairAddress) return match.pairAddress;
+                if (data[0] && data[0].pairAddress) return data[0].pairAddress;
+              }
+            } catch(e) { continue; }
+          }
+          return null;
+        } catch(e) { return null; }
+      })()`) as string | null;
+
+      if (created && page) await page.close().catch(() => {});
+
+      if (pairAddress) {
+        this.pairAddressCache.set(mint, { pair: pairAddress, ts: Date.now() });
+        this.logger.debug(`[Browser] Resolved pair for ${mint.slice(0, 8)}…: ${pairAddress.slice(0, 8)}…`);
+      }
+
+      if (!pairAddress && (this.hasAxiomCookies() || this.hasAxiomAuthHeaders())) {
+        this.logger.debug('[Browser] CDP pair resolve returned null, trying direct fetch...');
+        return this.resolveAxiomPairDirect(mint);
+      }
+      return pairAddress;
+    } catch (err: any) {
+      this.logger.warn(`[Browser] resolveAxiomPair CDP failed: ${err.message}`);
+      if (created && page) try { await page.close(); } catch {}
+      if (this.hasAxiomCookies() || this.hasAxiomAuthHeaders()) {
+        return this.resolveAxiomPairDirect(mint);
+      }
+      return null;
+    }
+  }
+
+private async resolveAxiomPairDirect(mint: string): Promise<string | null> {
+    const cached = this.pairAddressCache.get(mint);
+    if (cached && Date.now() - cached.ts < BrowserService.PAIR_CACHE_TTL) return cached.pair;
+    try {
+      const v = Date.now();
+      const domains = ['api.axiom.trade', 'api10.axiom.trade', 'api9.axiom.trade'];
+      for (const domain of domains) {
+        try {
+          const url = `https://${domain}/search-v4?searchQuery=${encodeURIComponent(mint)}&isOg=false&isPumpSearch=false&isBonkSearch=false&isBagsSearch=false&isUsd1Search=false&onlyBonded=false&sortBy=trending&v=${v}`;
+          const data = await this.axiomDirectFetch(url);
+          if (Array.isArray(data) && data.length > 0) {
+            const match = data.find((d: any) => d.tokenAddress === mint);
+            const pairAddress = match?.pairAddress || data[0]?.pairAddress;
+            if (pairAddress) {
+              this.pairAddressCache.set(mint, { pair: pairAddress, ts: Date.now() });
+              this.logger.debug(`[Browser] Resolved pair (direct) for ${mint.slice(0, 8)}…: ${pairAddress.slice(0, 8)}…`);
+              return pairAddress;
+            }
+          }
+        } catch { continue; }
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.warn(`[Browser] resolveAxiomPairDirect failed: ${err.message}`);
+      return null;
+    }
+  }
+
+async axiomBatchTokenData(pairAddress: string): Promise<{
+    tokenInfo: any;
+    pairInfo: any;
+    tokenAnalysis: any;
+    kolTxns: any[];
+    sniperTxns: any[];
+    holderData: any[];
+  } | null> {
+
+    if (!this.mainBrowser?.connected) {
+      if (!this.hasAxiomCookies()) return null;
+      return this.axiomBatchTokenDataDirect(pairAddress);
+    }
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+
+      const v = Date.now();
+
+      const result = await page.evaluate(`(async () => {
+        const base = 'https://api.axiom.trade';
+        const pair = ${JSON.stringify(pairAddress)};
+        const ts = ${v};
+        const _doFetch = async (url) => {
+          try {
+            const r = await fetch(url, { credentials: 'include' });
+            return r.ok ? await r.json() : null;
+          } catch { return null; }
+        };
+        const [tokenInfo, pairInfo, kolTxns, sniperTxns, holderData] = await Promise.all([
+          _doFetch(base + '/token-info?pairAddress=' + pair + '&v=' + ts),
+          _doFetch(base + '/pair-info?pairAddress=' + pair + '&v=' + (ts + 1)),
+          _doFetch(base + '/kol-transactions-v2?pairAddress=' + pair + '&v=' + (ts + 2)),
+          _doFetch(base + '/sniper-transactions?pairAddress=' + pair + '&v=' + (ts + 3)),
+          _doFetch(base + '/holder-data-v5?pairAddress=' + pair + '&v=' + (ts + 4)),
+        ]);
+        let tokenAnalysis = null;
+        if (pairInfo && pairInfo.deployerAddress && pairInfo.tokenTicker) {
+          tokenAnalysis = await _doFetch(
+            base + '/token-analysis?devAddress=' + pairInfo.deployerAddress + '&tokenTicker=' + encodeURIComponent(pairInfo.tokenTicker) + '&pairAddress=' + pair + '&v=' + (ts + 5)
+          );
+        }
+        return { tokenInfo, pairInfo, tokenAnalysis, kolTxns: kolTxns || [], sniperTxns: sniperTxns || [], holderData: holderData || [] };
+      })()`);
+
+      if (created && page) await page.close().catch(() => {});
+
+      if (!result?.tokenInfo && !result?.pairInfo && this.hasAxiomCookies()) {
+        this.logger.debug('[Browser] CDP returned empty Axiom data, trying direct fetch with cookies...');
+        return this.axiomBatchTokenDataDirect(pairAddress);
+      }
+      return result;
+    } catch (err: any) {
+      this.logger.warn(`[Browser] axiomBatchTokenData CDP failed: ${err.message}`);
+      if (created && page) try { await page.close(); } catch {}
+
+      if (this.hasAxiomCookies()) {
+        this.logger.debug('[Browser] Falling back to direct fetch with cookies...');
+        return this.axiomBatchTokenDataDirect(pairAddress);
+      }
+      return null;
+    }
+  }
+
+private async axiomBatchTokenDataDirect(pairAddress: string): Promise<{
+    tokenInfo: any; pairInfo: any; tokenAnalysis: any; kolTxns: any[]; sniperTxns: any[]; holderData: any[];
+  } | null> {
+    try {
+      const base = 'https://api.axiom.trade';
+      const v = Date.now();
+      const [tokenInfo, pairInfo, kolTxns, sniperTxns, holderData] = await Promise.all([
+        this.axiomDirectFetch(`${base}/token-info?pairAddress=${pairAddress}&v=${v}`),
+        this.axiomDirectFetch(`${base}/pair-info?pairAddress=${pairAddress}&v=${v + 1}`),
+        this.axiomDirectFetch(`${base}/kol-transactions-v2?pairAddress=${pairAddress}&v=${v + 2}`),
+        this.axiomDirectFetch(`${base}/sniper-transactions?pairAddress=${pairAddress}&v=${v + 3}`),
+        this.axiomDirectFetch(`${base}/holder-data-v5?pairAddress=${pairAddress}&v=${v + 4}`),
+      ]);
+      let tokenAnalysis = null;
+      if (pairInfo && pairInfo.deployerAddress && pairInfo.tokenTicker) {
+        tokenAnalysis = await this.axiomDirectFetch(
+          `${base}/token-analysis?devAddress=${pairInfo.deployerAddress}&tokenTicker=${encodeURIComponent(pairInfo.tokenTicker)}&pairAddress=${pairAddress}&v=${v + 5}`
+        );
+      }
+      return { tokenInfo, pairInfo, tokenAnalysis, kolTxns: kolTxns || [], sniperTxns: sniperTxns || [], holderData: holderData || [] };
+    } catch (err: any) {
+      this.logger.warn(`[Browser] axiomBatchTokenDataDirect failed: ${err.message}`);
+      return null;
+    }
+  }
+
+async extractAxiomCookies(): Promise<string | null> {
+    if (!this.mainBrowser?.connected) return null;
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+      const client = await page.createCDPSession();
+      const { cookies } = await client.send('Network.getCookies', {
+        urls: ['https://axiom.trade', 'https://api.axiom.trade'],
+      }) as any;
+      await client.detach();
+      if (created && page) await page.close().catch(() => {});
+      if (!cookies?.length) return null;
+      return cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+    } catch (err: any) {
+      this.logger.warn(`[Browser] extractAxiomCookies failed: ${err.message}`);
+      if (created && page) try { await page.close(); } catch {}
+      return null;
+    }
+  }
+
+
+  async connectGmgn(): Promise<{ success: boolean; message: string; loggedIn?: boolean }> {
+    try {
+      if (!this.mainBrowser?.connected) {
+        const detect = await this.detectMainBrowser();
+        if (!detect.available || !detect.wsEndpoint) {
+          return { success: false, message: 'Chrome not detected. Enable chrome://inspect/#remote-debugging first.' };
+        }
+        this.mainBrowser = await puppeteer.connect({ browserWSEndpoint: detect.wsEndpoint, defaultViewport: null });
+        this.mainBrowser.on('disconnected', () => { this.mainBrowser = null; this.axiomConnected = false; this.gmgnConnected = false; });
+      }
+      const loggedIn = await this.checkGmgnSession();
+      this.gmgnConnected = true;
+      return { success: true, message: loggedIn ? 'GMGN connected — session active' : 'Connected. Log into gmgn.ai in Chrome, then click Check Session.', loggedIn };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  async disconnectGmgn(): Promise<void> {
+    this.gmgnConnected = false;
+    this.logger.info('[Browser] GMGN disconnected');
+  }
+
+async captureGmgnWsUrl(): Promise<{ success: boolean; wsUrl?: string; message: string }> {
+    if (!this.mainBrowser?.connected) {
+
+      const detect = await this.detectMainBrowser();
+      if (!detect.available || !detect.wsEndpoint) {
+        return { success: false, message: 'Chrome not detected. Enable chrome://inspect/#remote-debugging first.' };
+      }
+      this.mainBrowser = await puppeteer.connect({ browserWSEndpoint: detect.wsEndpoint, defaultViewport: null });
+      this.mainBrowser.on('disconnected', () => { this.mainBrowser = null; this.axiomConnected = false; this.gmgnConnected = false; });
+    }
+
+    let page: Page | null = null;
+    let createdPage = false;
+    try {
+
+      const pages = await this.mainBrowser!.pages();
+      page = pages.find(p => { try { return p.url().includes('gmgn.ai'); } catch { return false; } }) || null;
+
+      if (!page) {
+        page = await this.mainBrowser!.newPage();
+        createdPage = true;
+      }
+
+
+      const cdp = await page.createCDPSession();
+
+      return await new Promise<{ success: boolean; wsUrl?: string; message: string }>((resolve) => {
+        let resolved = false;
+        const cleanup = () => {
+          if (createdPage && page) page.close().catch(() => {});
+          cdp.detach().catch(() => {});
+        };
+
+
+        cdp.on('Network.webSocketCreated', (params: any) => {
+          const url: string = params.url || '';
+          if (!resolved && url.includes('gmgn.ai/ws')) {
+            resolved = true;
+            this.logger.info('[Browser] Captured GMGN WS URL: ' + url.slice(0, 80) + '...');
+            cleanup();
+            resolve({ success: true, wsUrl: url, message: 'WebSocket URL captured successfully' });
+          }
+        });
+
+        cdp.send('Network.enable').then(() => {
+
+          const currentUrl = page!.url();
+          if (currentUrl.includes('gmgn.ai') && currentUrl.includes('/x/tracker')) {
+
+            page!.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          } else {
+            page!.goto('https://gmgn.ai/x/tracker', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          }
+        }).catch(() => {});
+
+
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve({ success: false, message: 'Timeout — no GMGN WebSocket detected. Make sure you are logged into gmgn.ai.' });
+          }
+        }, 20000);
+      });
+    } catch (err: any) {
+      if (createdPage && page) try { page.close(); } catch {}
+      return { success: false, message: err.message };
+    }
+  }
+
+  async checkGmgnSession(): Promise<boolean> {
+    if (!this.mainBrowser?.connected) return false;
+    let page: Page | null = null;
+    let created = false;
+    try {
+      const pages = await this.mainBrowser.pages();
+      page = pages.find(p => { try { return p.url().includes('gmgn.ai'); } catch { return false; } }) || null;
+      if (!page) {
+        page = await this.mainBrowser.newPage();
+        created = true;
+        await page.goto('https://gmgn.ai', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      }
+      const loggedIn = await page.evaluate(() => {
+
+        const hasSidCookie = document.cookie.includes('sid=');
+        let hasUserInfo = false;
+        try { hasUserInfo = !!(localStorage.getItem('userInfo') || localStorage.getItem('accountInfo')); } catch {}
+
+        const hasLoginBtn = !!(document.querySelector('button[class*="login"], button[class*="Login"], [class*="connect-wallet"]'));
+        return (hasSidCookie || hasUserInfo) && !hasLoginBtn;
+      });
+      if (created && page) await page.close().catch(() => {});
+      return loggedIn;
+    } catch (err: any) {
+      this.logger.warn('[Browser] GMGN session check failed:', err.message);
+      if (created && page) try { await page.close(); } catch {}
+      return false;
+    }
+  }
+
+async scrapeGmgnToken(mint: string): Promise<any> {
+    if (!this.mainBrowser?.connected) {
+      return { error: 'Chrome not connected. Connect via Settings → Browser first.' };
+    }
+    let page: Page | null = null;
+    try {
+      page = await this.mainBrowser.newPage();
+      await page.goto(`https://gmgn.ai/sol/token/${mint}`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.waitForSelector('table, [class*="holder"], [class*="trader"]', { timeout: 10000 }).catch(() => {});
+
+      const data = await page.evaluate(() => {
+        const results: any = { topHolders: [], smartMoney: [], kols: [], insiders: [], raw: '' };
+
+        const holderRows = document.querySelectorAll('table tbody tr, [class*="holder-row"]');
+        holderRows.forEach((row: any) => {
+          const cells = row.querySelectorAll('td, [class*="cell"]');
+          const texts = Array.from(cells).map((c: any) => c.innerText?.trim()).filter(Boolean);
+          if (texts.length >= 2) {
+            results.topHolders.push({
+              address: texts[0] || '',
+              percentage: texts[1] || '',
+              value: texts[2] || '',
+              extra: texts.slice(3).join(' | '),
+            });
+          }
+        });
+
+        const smartTags = document.querySelectorAll('[class*="smart"], [class*="kol"], [class*="whale"], [class*="insider"], [class*="influencer"]');
+        smartTags.forEach((tag: any) => {
+          const text = tag.innerText?.trim();
+          const parent = tag.closest('tr, [class*="row"]');
+          const parentText = parent?.innerText?.trim()?.slice(0, 300) || '';
+          if (text) {
+            const entry = { label: text, context: parentText };
+            if (/smart/i.test(text)) results.smartMoney.push(entry);
+            else if (/kol|influencer/i.test(text)) results.kols.push(entry);
+            else if (/insider/i.test(text)) results.insiders.push(entry);
+          }
+        });
+        results.raw = (document.body?.innerText || '').slice(0, 8000);
+        return results;
+      });
+
+      await page.close().catch(() => {});
+      return { mint, source: 'gmgn', ...data };
+    } catch (err: any) {
+      if (page) try { await page.close(); } catch {}
+      return { error: err.message, mint, source: 'gmgn' };
+    }
+  }
+
   async shutdown(): Promise<void> {
+    this.axiomConnected = false;
+    this.gmgnConnected = false;
+    await this.disconnectMainBrowser();
     if (this.loginBrowser?.connected) {
       await this.loginBrowser.close().catch(() => {});
       this.loginBrowser = null;

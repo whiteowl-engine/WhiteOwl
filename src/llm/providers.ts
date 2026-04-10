@@ -1,14 +1,9 @@
-import { LLMMessage, LLMTool, LLMResponse, LLMToolCall, LLMProvider, ModelConfig, LLMProviderName, LLMStreamChunk } from '../types';
-import { OAuthManager } from '../core/oauth-manager';
+import { LLMMessage, LLMTool, LLMResponse, LLMToolCall, LLMProvider, ModelConfig, LLMProviderName, LLMStreamChunk } from '../types.ts';
+import { OAuthManager } from '../core/oauth-manager.ts';
 
-// Singleton reference to the OAuthManager — set from runtime
 let _oauthManager: OAuthManager | null = null;
 export function setOAuthManager(manager: OAuthManager): void { _oauthManager = manager; }
 export function getOAuthManager(): OAuthManager | null { return _oauthManager; }
-
-// =====================================================
-// Base URL registry for OpenAI-compatible providers
-// =====================================================
 
 const OPENAI_COMPATIBLE_URLS: Partial<Record<LLMProviderName, string>> = {
   openai: 'https://api.openai.com/v1',
@@ -29,21 +24,11 @@ const OPENAI_COMPATIBLE_URLS: Partial<Record<LLMProviderName, string>> = {
   hyperbolic: 'https://api.hyperbolic.xyz/v1',
   cohere: 'https://api.cohere.com/compatibility/v1',
   lepton: 'https://api.lepton.ai/v1',
-  cursor: 'https://api.cursor.com/v1',
 };
 
 const OPENAI_COMPATIBLE_PROVIDERS = new Set<LLMProviderName>(
   Object.keys(OPENAI_COMPATIBLE_URLS) as LLMProviderName[]
 );
-
-// =====================================================
-// OpenAI-compatible provider
-// Handles: OpenAI, Groq, DeepSeek, OpenRouter, Mistral,
-// xAI, Cerebras, Together, Fireworks, Perplexity,
-// HuggingFace, GitHub Models, MiniMax, Moonshot,
-// SambaNova, Hyperbolic, Cohere, Lepton, and any
-// custom OpenAI-compatible endpoint via baseUrl
-// =====================================================
 
 export class OpenAIProvider implements LLMProvider {
   private apiKey: string;
@@ -59,11 +44,19 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async chat(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
+
+    const filteredMessages = messages.filter(m => m && m.role);
+    const isGroq = this.providerName === 'groq';
+    const isDeepSeek = this.providerName === 'deepseek';
+    const processedMessages = isGroq
+      ? this.trimForRateLimit(filteredMessages)
+      : filteredMessages;
+
     const body: Record<string, any> = {
       model: this.model,
-      messages: messages.filter(m => m && m.role).map(m => this.formatMessage(m)),
+      messages: processedMessages.map(m => this.formatMessage(m)),
       temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens ?? 16384,
+      max_tokens: options?.maxTokens ?? (isGroq ? 4096 : 16384),
     };
 
     if (tools && tools.length > 0) {
@@ -76,54 +69,118 @@ export class OpenAIProvider implements LLMProvider {
       'Authorization': `Bearer ${this.apiKey}`,
     };
 
-    // OpenRouter requires extra headers
     if (this.providerName === 'openrouter') {
       headers['HTTP-Referer'] = 'https://github.com/axiom-trading/axiom';
       headers['X-Title'] = 'AXIOM Trading Shell';
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
+
+    const MAX_RETRIES = 4;
+    const BACKOFF_MS = [5000, 15000, 30000, 60000];
+    const FETCH_TIMEOUT_MS = 300_000;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+      let response: Response;
+      try {
+                response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: abort.signal,
+        });
+      } catch (err: any) {
+        clearTimeout(timer);
+        if (err.name === 'AbortError') throw new Error(`LLM request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (response.status === 429) {
+        if (attempt === MAX_RETRIES) {
+          const errorBody = await response.text();
+          throw new Error(`LLM request failed (429): ${errorBody}`);
+        }
+
+        const retryAfterHeader = response.headers.get('retry-after');
+        let waitMs = BACKOFF_MS[attempt] || 60000;
+        if (retryAfterHeader) {
+          waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfterHeader) * 1000 + 500));
+        } else {
+          const body429 = await response.text();
+          const match = body429.match(/try again in ([0-9.]+)s/i);
+          if (match) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(match[1]) * 1000 + 500));
+        }
+        console.warn(`[${this.providerName}] 429 rate limit — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`LLM request failed (${response.status}): ${errorBody}`);
+      }
+
+      const data = await response.json() as any;
+      const choice = data.choices[0];
+      const msg = choice.message;
+
+      const result: LLMResponse = {
+        content: msg.content || '',
+        usage: data.usage ? {
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+        } : undefined,
+      };
+
+      if (msg.tool_calls) {
+        result.toolCalls = msg.tool_calls.map((tc: any): LLMToolCall => ({
+          id: tc.id,
+          function: { name: tc.function.name, arguments: tc.function.arguments },
+        }));
+      }
+
+      return result;
+    }
+
+    throw new Error('LLM request failed after retries');
+  }
+
+private trimForRateLimit(messages: LLMMessage[]): LLMMessage[] {
+    if (messages.length === 0) return messages;
+
+
+    const TOOL_RESULT_LIMIT = 3000;
+    const SYS_LIMIT = 6000;
+
+    return messages.map((m, i) => {
+
+      if (m.role === 'system' && m.content && m.content.length > SYS_LIMIT) {
+        return { ...m, content: m.content.slice(0, SYS_LIMIT) + '\n[...trimmed for rate limit]' };
+      }
+
+      if (m.role === 'tool' && m.content && m.content.length > TOOL_RESULT_LIMIT) {
+        const isRecent = i >= messages.length - 16;
+        if (!isRecent) {
+          return { ...m, content: m.content.slice(0, TOOL_RESULT_LIMIT) + '\n[trimmed]' };
+        }
+      }
+      return m;
     });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`LLM request failed (${response.status}): ${errorBody}`);
-    }
-
-    const data = await response.json() as any;
-    const choice = data.choices[0];
-    const msg = choice.message;
-
-    const result: LLMResponse = {
-      content: msg.content || '',
-      usage: data.usage ? {
-        promptTokens: data.usage.prompt_tokens,
-        completionTokens: data.usage.completion_tokens,
-      } : undefined,
-    };
-
-    if (msg.tool_calls) {
-      result.toolCalls = msg.tool_calls.map((tc: any): LLMToolCall => ({
-        id: tc.id,
-        function: {
-          name: tc.function.name,
-          arguments: tc.function.arguments,
-        },
-      }));
-    }
-
-    return result;
   }
 
   async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
+    const isGroq = this.providerName === 'groq';
+    const isDeepSeek = this.providerName === 'deepseek';
+    const filteredMessages = messages.filter(m => m && m.role);
+    const processedMessages = isGroq ? this.trimForRateLimit(filteredMessages) : filteredMessages;
+
     const body: Record<string, any> = {
       model: this.model,
-      messages: messages.filter(m => m && m.role).map(m => this.formatMessage(m)),
+      messages: processedMessages.map(m => this.formatMessage(m)),
       temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens ?? 4096,
+      max_tokens: options?.maxTokens ?? (isGroq ? 4096 : 16384),
       stream: true,
     };
 
@@ -142,18 +199,55 @@ export class OpenAIProvider implements LLMProvider {
       headers['X-Title'] = 'AXIOM Trading Shell';
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`LLM stream failed (${response.status}): ${errorBody}`);
+    let response: Response | null = null;
+    const MAX_RETRIES = 4;
+    const BACKOFF_MS = [5000, 15000, 30000, 60000];
+    const FETCH_TIMEOUT_MS = 300_000;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+      try {
+                response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: abort.signal,
+        });
+      } catch (err: any) {
+        clearTimeout(timer);
+        if (err.name === 'AbortError') throw new Error(`LLM stream timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (response.status === 429) {
+        if (attempt === MAX_RETRIES) {
+          const errorBody = await response.text();
+          throw new Error(`LLM stream failed (429): ${errorBody}`);
+        }
+        const retryAfterHeader = response.headers.get('retry-after');
+        let waitMs = BACKOFF_MS[attempt] || 60000;
+        if (retryAfterHeader) {
+          waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfterHeader) * 1000 + 500));
+        } else {
+          const body429 = await response.text();
+          const match = body429.match(/try again in ([0-9.]+)s/i);
+          if (match) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(match[1]) * 1000 + 500));
+        }
+        console.warn(`[${this.providerName}] stream 429 — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      break;
     }
 
-    const reader = response.body?.getReader();
+    if (!response!.ok) {
+      const errorBody = await response!.text();
+      throw new Error(`LLM stream failed (${response!.status}): ${errorBody}`);
+    }
+
+    const reader = response!.body?.getReader();
     if (!reader) throw new Error('No response body for streaming');
 
     const decoder = new TextDecoder();
@@ -208,7 +302,7 @@ export class OpenAIProvider implements LLMProvider {
               }
             }
           } catch {
-            // Skip malformed SSE chunks
+
           }
         }
       }
@@ -232,7 +326,7 @@ export class OpenAIProvider implements LLMProvider {
       role: msg.role,
     };
 
-    // Support image content blocks for vision models
+
     if (msg.image && msg.role === 'user') {
       const base64 = msg.image.replace(/^data:image\/[^;]+;base64,/, '');
       formatted.content = [
@@ -259,9 +353,6 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Anthropic Claude provider
-// =====================================================
 
 export class AnthropicProvider implements LLMProvider {
   private apiKey: string;
@@ -286,7 +377,8 @@ export class AnthropicProvider implements LLMProvider {
     };
 
     if (systemMsg) {
-      body.system = systemMsg.content;
+
+      body.system = [{ type: 'text', text: systemMsg.content, cache_control: { type: 'ephemeral' } }];
     }
 
     if (tools && tools.length > 0) {
@@ -295,24 +387,48 @@ export class AnthropicProvider implements LLMProvider {
         description: t.function.description,
         input_schema: t.function.parameters,
       }));
+
+      if (body.tools.length > 0) {
+        body.tools[body.tools.length - 1].cache_control = { type: 'ephemeral' };
+      }
     }
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Anthropic request failed (${response.status}): ${errorBody}`);
+    let response: Response | null = null;
+    const MAX_RETRIES = 4;
+    const BACKOFF_MS = [5000, 15000, 30000, 60000];
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            response = await fetch(`${this.baseUrl}/v1/messages`, {
+                method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'prompt-caching-2024-07-31',
+        },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 429) {
+        if (attempt === MAX_RETRIES) {
+          const errorBody = await response.text();
+          throw new Error(`Anthropic request failed (429): ${errorBody}`);
+        }
+        const retryAfter = response.headers.get('retry-after');
+        let waitMs = BACKOFF_MS[attempt] || 60000;
+        if (retryAfter) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfter) * 1000 + 500));
+        console.warn(`[Anthropic] 429 — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      break;
     }
 
-    const data = await response.json() as any;
+    if (!response!.ok) {
+      const errorBody = await response!.text();
+      throw new Error(`Anthropic request failed (${response!.status}): ${errorBody}`);
+    }
+
+    const data = await response!.json() as any;
 
     let content = '';
     const toolCalls: LLMToolCall[] = [];
@@ -353,7 +469,9 @@ export class AnthropicProvider implements LLMProvider {
       stream: true,
     };
 
-    if (systemMsg) body.system = systemMsg.content;
+    if (systemMsg) {
+      body.system = [{ type: 'text', text: systemMsg.content, cache_control: { type: 'ephemeral' } }];
+    }
 
     if (tools && tools.length > 0) {
       body.tools = tools.map(t => ({
@@ -361,24 +479,47 @@ export class AnthropicProvider implements LLMProvider {
         description: t.function.description,
         input_schema: t.function.parameters,
       }));
+      if (body.tools.length > 0) {
+        body.tools[body.tools.length - 1].cache_control = { type: 'ephemeral' };
+      }
     }
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Anthropic stream failed (${response.status}): ${errorBody}`);
+    let response: Response | null = null;
+    const STREAM_MAX_RETRIES = 4;
+    const STREAM_BACKOFF = [5000, 15000, 30000, 60000];
+    for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
+            response = await fetch(`${this.baseUrl}/v1/messages`, {
+                method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'prompt-caching-2024-07-31',
+        },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 429) {
+        if (attempt === STREAM_MAX_RETRIES) {
+          const errorBody = await response.text();
+          throw new Error(`Anthropic stream failed (429): ${errorBody}`);
+        }
+        const retryAfter = response.headers.get('retry-after');
+        let waitMs = STREAM_BACKOFF[attempt] || 60000;
+        if (retryAfter) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfter) * 1000 + 500));
+        console.warn(`[Anthropic] stream 429 — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${STREAM_MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      break;
     }
 
-    const reader = response.body?.getReader();
+    if (!response!.ok) {
+      const errorBody = await response!.text();
+      throw new Error(`Anthropic stream failed (${response!.status}): ${errorBody}`);
+    }
+
+    const reader = response!.body?.getReader();
     if (!reader) throw new Error('No response body for streaming');
 
     const decoder = new TextDecoder();
@@ -438,7 +579,7 @@ export class AnthropicProvider implements LLMProvider {
               };
             }
           } catch {
-            // Skip malformed SSE chunks
+
           }
         }
       }
@@ -455,7 +596,7 @@ export class AnthropicProvider implements LLMProvider {
         role: 'user',
         content: [{
           type: 'tool_result',
-          tool_use_id: msg.toolCallId,
+          tool_use_id: sanitizeToolId(msg.toolCallId || ''),
           content: msg.content,
         }],
       };
@@ -469,7 +610,7 @@ export class AnthropicProvider implements LLMProvider {
       for (const tc of msg.toolCalls) {
         content.push({
           type: 'tool_use',
-          id: tc.id,
+          id: sanitizeToolId(tc.id),
           name: tc.function.name,
           input: JSON.parse(tc.function.arguments),
         });
@@ -484,9 +625,57 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Google Gemini provider (native REST API)
-// =====================================================
+
+function normalizeGeminiContents(msgs: LLMMessage[]): Record<string, any>[] {
+  const result: Record<string, any>[] = [];
+
+  for (const msg of msgs) {
+    const geminiRole = msg.role === 'assistant' ? 'model' : 'user';
+
+    let parts: any[];
+    if (msg.role === 'tool') {
+      parts = [{
+        functionResponse: {
+          name: msg.toolCallId || 'unknown_tool',
+          response: { content: msg.content },
+        },
+      }];
+    } else if (msg.role === 'assistant' && msg.toolCalls?.length) {
+      parts = [];
+      if (msg.content) parts.push({ text: msg.content });
+      for (const tc of msg.toolCalls) {
+        try {
+          parts.push({ functionCall: { name: tc.function.name, args: JSON.parse(tc.function.arguments) } });
+        } catch {
+          parts.push({ functionCall: { name: tc.function.name, args: {} } });
+        }
+      }
+    } else if (msg.image && msg.role === 'user') {
+      parts = [
+        { text: msg.content || '' },
+        { inlineData: { mimeType: 'image/png', data: msg.image.replace(/^data:image\/[^;]+;base64,/, '') } },
+      ];
+    } else {
+      parts = [{ text: msg.content || '' }];
+    }
+
+    const last = result[result.length - 1];
+    if (last && last.role === geminiRole && geminiRole === 'user') {
+
+      last.parts.push(...parts);
+    } else {
+      result.push({ role: geminiRole, parts });
+    }
+  }
+
+
+  if (result.length > 0 && result[0].role !== 'user') {
+    result.unshift({ role: 'user', parts: [{ text: '' }] });
+  }
+
+  return result;
+}
+
 
 export class GoogleGeminiProvider implements LLMProvider {
   private apiKey: string;
@@ -504,7 +693,7 @@ export class GoogleGeminiProvider implements LLMProvider {
     const systemMsg = messages.find(m => m.role === 'system');
     const nonSystem = messages.filter(m => m.role !== 'system');
 
-    const contents = nonSystem.map(m => this.formatMessage(m));
+    const contents = normalizeGeminiContents(nonSystem);
 
     const body: Record<string, any> = {
       contents,
@@ -528,22 +717,54 @@ export class GoogleGeminiProvider implements LLMProvider {
       }];
     }
 
-    const url = `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
 
-    if (!response.ok) {
+    const fallbackChain = [
+      this.model,
+      ...(this.model !== 'gemini-2.5-flash' ? ['gemini-2.5-flash'] : []),
+      ...(this.model !== 'gemini-2.5-flash-lite' ? ['gemini-2.5-flash-lite'] : []),
+    ];
+
+    let lastError = '';
+    for (let i = 0; i < fallbackChain.length; i++) {
+      const modelToTry = fallbackChain[i];
+      if (i > 0) {
+        console.warn(`[Gemini] Falling back from ${fallbackChain[i - 1]} to ${modelToTry}`);
+        this.model = modelToTry;
+      }
+
+      const url = `${this.baseUrl}/models/${modelToTry}:generateContent?key=${this.apiKey}`;
+      const response = await fetch(url, {
+                method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        const data = await response.json() as any;
+        const candidate = data.candidates?.[0];
+        if (!candidate) throw new Error('Gemini returned no candidates');
+        return this._parseCandidate(candidate, data);
+      }
+
       const errorBody = await response.text();
-      throw new Error(`Gemini request failed (${response.status}): ${errorBody}`);
+      lastError = `Gemini request failed (${response.status}) for ${modelToTry}: ${errorBody}`;
+
+
+      if (response.status !== 429 && response.status !== 404) {
+        throw new Error(lastError);
+      }
+
+
+      if (response.status === 429 && i < fallbackChain.length - 1) {
+        const retryAfterMs = Math.min(10_000, (parseInt(response.headers.get('retry-after') || '0', 10) || 2) * 1000);
+        await new Promise(r => setTimeout(r, retryAfterMs));
+      }
     }
 
-    const data = await response.json() as any;
-    const candidate = data.candidates?.[0];
-    if (!candidate) throw new Error('Gemini returned no candidates');
+    throw new Error(lastError);
+  }
 
+  private _parseCandidate(candidate: any, data: any): LLMResponse {
     let content = '';
     const toolCalls: LLMToolCall[] = [];
 
@@ -569,6 +790,80 @@ export class GoogleGeminiProvider implements LLMProvider {
         completionTokens: data.usageMetadata.candidatesTokenCount || 0,
       } : undefined,
     };
+  }
+
+  async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
+    messages = messages.filter(m => m && m.role);
+    const systemMsg = messages.find(m => m.role === 'system');
+    const nonSystem = messages.filter(m => m.role !== 'system');
+    const contents = normalizeGeminiContents(nonSystem);
+
+    const body: Record<string, any> = {
+      contents,
+      generationConfig: {
+        temperature: options?.temperature ?? 0.7,
+        maxOutputTokens: options?.maxTokens ?? 4096,
+      },
+    };
+    if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+    if (tools && tools.length > 0) {
+      body.tools = [{ functionDeclarations: tools.map(t => ({ name: t.function.name, description: t.function.description, parameters: t.function.parameters })) }];
+    }
+
+    const url = `${this.baseUrl}/models/${this.model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
+    const response = await fetch(url, {
+            method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Gemini stream failed (${response.status}): ${errorBody}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body for Gemini streaming');
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const sseData = trimmed.slice(6);
+          if (sseData === '[DONE]') { yield { done: true }; return; }
+          try {
+            const parsed = JSON.parse(sseData);
+            const candidate = parsed.candidates?.[0];
+            if (!candidate) continue;
+            for (const part of candidate.content?.parts || []) {
+              if (part.text) yield { content: part.text, done: false };
+              if (part.functionCall) {
+                yield {
+                  toolCalls: [{
+                    id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                    function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) },
+                  }],
+                  done: false,
+                };
+              }
+            }
+            if (candidate.finishReason) yield { done: true };
+          } catch {  }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    yield { done: true };
   }
 
   private formatMessage(msg: LLMMessage): Record<string, any> {
@@ -615,9 +910,6 @@ export class GoogleGeminiProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Azure OpenAI provider
-// =====================================================
 
 export class AzureOpenAIProvider implements LLMProvider {
   private apiKey: string;
@@ -651,7 +943,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
     const url = `${this.baseUrl}/openai/deployments/${this.deployment}/chat/completions?api-version=${this.apiVersion}`;
     const response = await fetch(url, {
-      method: 'POST',
+            method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'api-key': this.apiKey,
@@ -702,10 +994,10 @@ export class AzureOpenAIProvider implements LLMProvider {
     } else {
       formatted.content = msg.content;
     }
-    if (msg.toolCallId) formatted.tool_call_id = msg.toolCallId;
+    if (msg.toolCallId) formatted.tool_call_id = sanitizeToolId(msg.toolCallId);
     if (msg.toolCalls) {
       formatted.tool_calls = msg.toolCalls.map(tc => ({
-        id: tc.id,
+        id: sanitizeToolId(tc.id),
         type: 'function',
         function: tc.function,
       }));
@@ -714,10 +1006,6 @@ export class AzureOpenAIProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Amazon Bedrock provider (uses AWS Signature V4)
-// Requires: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-// =====================================================
 
 export class BedrockProvider implements LLMProvider {
   private model: string;
@@ -772,8 +1060,8 @@ export class BedrockProvider implements LLMProvider {
 
     const headers = await this.signRequest('POST', host, path, payload, dateStamp, amzDate);
 
-    const response = await fetch(`https://${host}${path}`, {
-      method: 'POST',
+        const response = await fetch(`https://${host}${path}`, {
+            method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...headers,
@@ -855,10 +1143,6 @@ export class BedrockProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Google Vertex AI provider
-// Uses API key auth for simplicity (also supports OAuth)
-// =====================================================
 
 export class VertexAIProvider implements LLMProvider {
   private apiKey: string;
@@ -874,26 +1158,12 @@ export class VertexAIProvider implements LLMProvider {
   }
 
   async chat(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
-    // Delegate to Gemini-style call via Vertex endpoint
+
     messages = messages.filter(m => m && m.role);
     const systemMsg = messages.find(m => m.role === 'system');
     const nonSystem = messages.filter(m => m.role !== 'system');
 
-    const contents = nonSystem.map(m => {
-      if (m.image && m.role === 'user') {
-        return {
-          role: 'user',
-          parts: [
-            { text: m.content },
-            { inlineData: { mimeType: 'image/png', data: m.image.replace(/^data:image\/[^;]+;base64,/, '') } },
-          ],
-        };
-      }
-      return {
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      };
-    });
+    const contents = normalizeGeminiContents(nonSystem);
 
     const body: Record<string, any> = {
       contents,
@@ -917,9 +1187,9 @@ export class VertexAIProvider implements LLMProvider {
       }];
     }
 
-    const url = `https://${this.region}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.region}/publishers/google/models/${this.model}:generateContent`;
+    const url = `https://api.anthropic.com/v1/messages`;
     const response = await fetch(url, {
-      method: 'POST',
+            method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
@@ -963,112 +1233,410 @@ export class VertexAIProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Ollama local model provider
-// =====================================================
 
 export class OllamaProvider implements LLMProvider {
   private baseUrl: string;
   private model: string;
 
   constructor(config: ModelConfig) {
-    this.baseUrl = config.baseUrl || 'http://localhost:11434';
+
+    const raw = config.baseUrl || 'http://127.0.0.1:11434';
+    const url = new URL(raw);
+    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1';
+    this.baseUrl = isLocal ? raw.replace(/\/$/, '') : 'http://127.0.0.1:11434';
     this.model = config.model;
+  }
+
+private formatMessages(messages: LLMMessage[]): any[] {
+    const out: any[] = [];
+    for (const m of messages) {
+      if (m.role === 'tool') {
+
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '');
+        out.push({ role: 'tool', content, tool_call_id: sanitizeToolId(m.toolCallId || '') });
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
+        out.push({
+          role: 'assistant',
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''),
+          tool_calls: m.toolCalls.map(tc => {
+
+            let args = tc.function.arguments;
+            if (typeof args === 'string') {
+              try { args = JSON.parse(args); } catch { args = {}; }
+            }
+            return {
+              id: sanitizeToolId(tc.id),
+              type: 'function',
+              function: { name: tc.function.name, arguments: args },
+            };
+          }),
+        });
+      } else {
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '');
+        out.push({ role: m.role, content });
+      }
+    }
+    return out;
   }
 
   async chat(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
     messages = messages.filter(m => m && m.role);
+
     const body: Record<string, any> = {
       model: this.model,
-      messages: messages.map(m => ({
-        role: m.role === 'tool' ? 'user' : m.role,
-        content: m.content,
-      })),
+      messages: this.formatMessages(messages),
       stream: false,
       options: {
-        temperature: options?.temperature ?? 0.7,
-        num_predict: options?.maxTokens ?? 4096,
+        temperature: options?.temperature ?? 0.3,
+        num_predict: options?.maxTokens ?? 8192,
+        num_ctx: 32768,
       },
     };
 
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      body.tools = tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.function.name,
+          description: t.function.description,
+          parameters: t.function.parameters,
+        },
+      }));
     }
 
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
+        const response = await fetch(`${this.baseUrl}/api/chat`, {
+            method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
+
+      if (response.status === 404) {
+        throw new Error(`Ollama model "${this.model}" not found. Run: ollama pull ${this.model}`);
+      }
       throw new Error(`Ollama request failed (${response.status}): ${errorBody}`);
     }
 
     const data = await response.json() as any;
+    const result: LLMResponse = { content: data.message?.content || '' };
 
-    const result: LLMResponse = {
-      content: data.message?.content || '',
-    };
-
-    if (data.message?.tool_calls) {
+    if (data.message?.tool_calls?.length) {
       result.toolCalls = data.message.tool_calls.map((tc: any): LLMToolCall => ({
-        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         function: {
           name: tc.function.name,
-          arguments: JSON.stringify(tc.function.arguments),
+
+          arguments: typeof tc.function.arguments === 'string'
+            ? tc.function.arguments
+            : JSON.stringify(tc.function.arguments || {}),
         },
       }));
     }
 
+
+    if (!result.toolCalls?.length && result.content && tools && tools.length > 0) {
+      const extracted = extractToolCallsFromContent(result.content, tools);
+      if (extracted.length > 0) {
+        result.toolCalls = extracted;
+        result.content = '';
+      }
+    }
+
     return result;
+  }
+
+  async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
+    messages = messages.filter(m => m && m.role);
+
+    const body: Record<string, any> = {
+      model: this.model,
+      messages: this.formatMessages(messages),
+      stream: true,
+      options: {
+        temperature: options?.temperature ?? 0.3,
+        num_predict: options?.maxTokens ?? 8192,
+        num_ctx: 32768,
+      },
+    };
+
+    if (tools && tools.length > 0) {
+      body.tools = tools.map(t => ({
+        type: 'function',
+        function: { name: t.function.name, description: t.function.description, parameters: t.function.parameters },
+      }));
+    }
+
+        const response = await fetch(`${this.baseUrl}/api/chat`, {
+            method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Ollama stream failed (${response.status}): ${errorBody}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body for Ollama streaming');
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            const msg = parsed.message;
+            if (msg?.content) yield { content: msg.content, done: false };
+            if (msg?.tool_calls?.length) {
+              yield {
+                toolCalls: msg.tool_calls.map((tc: any): LLMToolCall => ({
+                  id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  function: {
+                    name: tc.function.name,
+                    arguments: typeof tc.function.arguments === 'string'
+                      ? tc.function.arguments
+                      : JSON.stringify(tc.function.arguments || {}),
+                  },
+                })),
+                done: false,
+              };
+            }
+            if (parsed.done) { yield { done: true }; return; }
+          } catch {  }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    yield { done: true };
   }
 }
 
-// =====================================================
-// GitHub Copilot provider (OAuth — free with Copilot subscription)
-// Two-step auth: GitHub OAuth token → Copilot session token → Chat API
-// Supports both /chat/completions and /responses endpoints
-// =====================================================
 
-// Models that require the Responses API (/responses) instead of /chat/completions
-const RESPONSES_ONLY_MODELS = new Set([
-  'gpt-5.4', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.2-codex',
-  'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5-mini',
-  'o4-mini', 'o3', 'o3-mini', 'o1', 'o1-mini', 'o1-preview',
+const CHAT_COMPLETIONS_ONLY = new Set([
+
+  'claude-opus-4', 'claude-sonnet-4', 'claude-sonnet-3.5',
+  'claude-haiku-3.5', 'claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku',
 ]);
+
+
+const COPILOT_MODEL_FALLBACK: string[] = [
+  'gpt-4.1',
+  'gpt-4o',
+  'claude-sonnet-4',
+  'gpt-4o-mini',
+];
+
+
+const _copilotUnsupportedModels = new Set<string>();
+
+
+const _copilotResponsesUnsupported = new Set<string>();
+
+function normalizeCopilotModel(model: string): string {
+
+
+  return model.replace(/-\d{8}$/, '');
+}
 
 export class CopilotProvider implements LLMProvider {
   private model: string;
   private oauthProvider: string;
   private copilotToken: string | null = null;
   private copilotTokenExpiresAt = 0;
+  private _temperatureUnsupported = false;
+
+
+  private _lastResponseId: string | null = null;
+  private _lastResponseMsgCount = 0;
+  private _chainingUnsupported = false;
+  private _lastSentToolNames = new Set<string>();
 
   constructor(config: ModelConfig) {
-    this.model = config.model || 'gpt-4o';
+    this.model = normalizeCopilotModel(config.model || 'gpt-4o');
     this.oauthProvider = 'github';
   }
 
   private needsResponsesAPI(): boolean {
-    // Only GPT models that strictly require Responses API
-    // Claude does NOT support Responses API on Copilot (returns 400)
-    return RESPONSES_ONLY_MODELS.has(this.model);
+
+
+    if (this._responsesApiFailed) return false;
+    if (CHAT_COMPLETIONS_ONLY.has(this.model)) return false;
+
+    if (this.model.includes('claude')) return false;
+
+    if (_copilotResponsesUnsupported.has(this.model)) return false;
+    return true;
   }
 
   private getEffectiveModel(_hasTools: boolean): string {
     return this.model;
   }
 
-  // Track if Responses API failed for this model — fall back to chat/completions
+
   private _responsesApiFailed = false;
 
-  /**
-   * Exchange GitHub OAuth token for a Copilot session token.
-   * The session token is short-lived and cached until near-expiry.
-   */
-  private async getCopilotToken(): Promise<string> {
-    // Return cached token if still valid (with 2min buffer)
+
+  private static readonly MAX_PAYLOAD_BYTES = 200 * 1024;
+
+
+  private static readonly MAX_INPUT_ITEMS = 200;
+
+  private static readonly RETRYABLE_5XX = new Set([500, 502, 503, 504]);
+
+private trimMessagesForPayload(messages: LLMMessage[]): LLMMessage[] {
+    const TRIM_LIMIT = 400;
+    const KEEP_RECENT = 3;
+    let toolIdx = 0;
+    const totalToolMsgs = messages.filter(m => m.role === 'tool').length;
+    return messages.map(m => {
+      if (m.role === 'tool') {
+        toolIdx++;
+        const isRecent = toolIdx > totalToolMsgs - KEEP_RECENT;
+        if (!isRecent && m.content && m.content.length > TRIM_LIMIT) {
+          const head = m.content.slice(0, Math.floor(TRIM_LIMIT * 0.5));
+          const tail = m.content.slice(-Math.floor(TRIM_LIMIT * 0.4));
+          return { ...m, content: head + '\n...[trimmed]...\n' + tail };
+        }
+      }
+      return m;
+    });
+  }
+
+private trimInputForPayload(input: any[], aggressive = false): any[] {
+    const TRIM_LIMIT = aggressive ? 120 : 400;
+    const KEEP_RECENT = aggressive ? 1 : 3;
+    let outputIdx = 0;
+    const totalOutputs = input.filter((item: any) => item.type === 'function_call_output').length;
+    return input.map((item: any) => {
+      if (item.type === 'function_call_output') {
+        outputIdx++;
+        const isRecent = outputIdx > totalOutputs - KEEP_RECENT;
+        if (!isRecent && item.output && item.output.length > TRIM_LIMIT) {
+          const head = item.output.slice(0, Math.floor(TRIM_LIMIT * 0.5));
+          const tail = item.output.slice(-Math.floor(TRIM_LIMIT * 0.4));
+          return { ...item, output: head + '\n...[trimmed]...\n' + tail };
+        }
+      }
+      return item;
+    });
+  }
+
+private truncateInput(input: any[], keepLast = 12): any[] {
+
+    const head: any[] = [];
+    let startIdx = 0;
+    for (let i = 0; i < input.length; i++) {
+      if (input[i].role === 'developer' || input[i].role === 'system') {
+        head.push(input[i]);
+        startIdx = i + 1;
+      } else break;
+    }
+    const rest = input.slice(startIdx);
+    if (rest.length <= keepLast) return input;
+    let kept = rest.slice(-keepLast);
+
+    while (kept.length > 0 && kept[0].type === 'function_call_output') kept.shift();
+
+    const keptCallIds = new Set(kept.filter((item: any) => item.type === 'function_call').map((item: any) => item.call_id));
+    kept = kept.filter((item: any) => {
+      if (item.type === 'function_call_output' && !keptCallIds.has(item.call_id)) return false;
+      return true;
+    });
+    const summary = { role: 'user', content: `[Context trimmed: ${rest.length - kept.length} older items removed to fit context window]` };
+    return [...head, summary, ...kept];
+  }
+
+private compactParamSchema(schema: Record<string, any>): Record<string, any> {
+    if (!schema || typeof schema !== 'object') return schema;
+    const result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (key === 'description' && typeof value === 'string' && value.length > 80) {
+        result[key] = value.slice(0, 77) + '...';
+      } else if (key === 'enum' && Array.isArray(value) && value.length > 8) {
+        result[key] = value.slice(0, 8);
+      } else if (key === 'examples' || key === 'example') {
+
+      } else if (key === 'properties' && typeof value === 'object') {
+        const props: Record<string, any> = {};
+        for (const [pName, pVal] of Object.entries(value)) {
+          props[pName] = this.compactParamSchema(pVal as Record<string, any>);
+        }
+        result[key] = props;
+      } else if (key === 'items' && typeof value === 'object') {
+        result[key] = this.compactParamSchema(value as Record<string, any>);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+private pruneToolsForPayload(body: Record<string, any>, level: 1 | 2 = 1): void {
+    if (!body.tools || !Array.isArray(body.tools) || body.tools.length === 0) return;
+    const originalSize = JSON.stringify(body.tools).length;
+
+
+    const essentialNames = new Set([
+      'project_write', 'project_read', 'project_list', 'project_str_replace',
+      'project_run', 'project_execute', 'project_serve', 'project_mkdir', 'project_start',
+    ]);
+
+    if (level >= 2) {
+
+      const usedNames = new Set<string>();
+      for (const item of body.input || []) {
+        if (item.type === 'function_call' && item.name) usedNames.add(item.name);
+      }
+      if (usedNames.size > 0) {
+        body.tools = body.tools.filter((t: any) =>
+          usedNames.has(t.name) || essentialNames.has(t.name)
+        );
+      }
+    }
+
+
+    for (const t of body.tools) {
+      if (essentialNames.has(t.name)) {
+
+        if (level >= 2 && t.parameters?.properties) {
+          for (const prop of Object.values(t.parameters.properties) as any[]) {
+            delete prop.description;
+          }
+        }
+        continue;
+      }
+      if (t.description && t.description.length > 60) {
+        t.description = t.description.slice(0, 57) + '...';
+      }
+
+      if (level >= 2 && t.parameters?.properties) {
+        for (const prop of Object.values(t.parameters.properties) as any[]) {
+          delete prop.description;
+        }
+      }
+    }
+
+    const newSize = JSON.stringify(body.tools).length;
+    if (newSize < originalSize) {
+      console.warn(`[Copilot/Responses] Pruned tools L${level}: ${(originalSize / 1024).toFixed(1)}KB → ${(newSize / 1024).toFixed(1)}KB (${body.tools.length} tools)`);
+    }
+  }
+
+private async getCopilotToken(): Promise<string> {
+
     if (this.copilotToken && Date.now() < this.copilotTokenExpiresAt - 2 * 60 * 1000) {
       return this.copilotToken;
     }
@@ -1078,8 +1646,8 @@ export class CopilotProvider implements LLMProvider {
     const githubToken = await manager.getToken(this.oauthProvider);
     if (!githubToken) throw new Error('No GitHub OAuth token. Connect GitHub via Settings -> OAuth.');
 
-    // Exchange OAuth token for Copilot session token
-    const response = await fetch('https://api.github.com/copilot_internal/v2/token', {
+
+        const response = await fetch('https://api.github.com/copilot_internal/v2/token', {
       headers: {
         'Authorization': `token ${githubToken}`,
         'Accept': 'application/json',
@@ -1100,12 +1668,48 @@ export class CopilotProvider implements LLMProvider {
 
     const data = await response.json() as any;
     this.copilotToken = data.token;
-    this.copilotTokenExpiresAt = data.expires_at * 1000; // convert unix seconds to ms
+    this.copilotTokenExpiresAt = data.expires_at * 1000;
     return this.copilotToken!;
+  }
+
+private static isModelNotSupported(err: any): boolean {
+    const msg = String(err?.message || err || '');
+    return msg.includes('model_not_supported') || msg.includes('The requested model is not supported');
   }
 
   async chat(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
     messages = messages.filter(m => m && m.role);
+    try {
+      return await this._chatInternal(messages, tools, options);
+    } catch (err: any) {
+      if (!CopilotProvider.isModelNotSupported(err)) throw err;
+
+      _copilotUnsupportedModels.add(this.model);
+      const originalModel = this.model;
+      for (const fallback of COPILOT_MODEL_FALLBACK) {
+        if (fallback === originalModel || _copilotUnsupportedModels.has(fallback)) continue;
+        console.warn(`[Copilot] Model "${originalModel}" not supported — trying fallback: ${fallback}`);
+        this.model = fallback;
+        this._responsesApiFailed = false;
+        try {
+          const result = await this._chatInternal(messages, tools, options);
+          console.log(`[Copilot] Fallback to "${fallback}" succeeded — using this model going forward`);
+          return result;
+        } catch (fbErr: any) {
+          if (CopilotProvider.isModelNotSupported(fbErr)) {
+            _copilotUnsupportedModels.add(fallback);
+            continue;
+          }
+          throw fbErr;
+        }
+      }
+
+      this.model = originalModel;
+      throw err;
+    }
+  }
+
+  private async _chatInternal(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
     const token = await this.getCopilotToken();
     const hasTools = !!(tools && tools.length > 0);
     const effectiveModel = this.getEffectiveModel(hasTools);
@@ -1114,14 +1718,13 @@ export class CopilotProvider implements LLMProvider {
       try {
         return await this.chatViaResponses(token, messages, tools, options);
       } catch (err: any) {
-        // If Responses API fails for this model, fall back to chat/completions permanently
-        if (!RESPONSES_ONLY_MODELS.has(this.model)) {
-          console.warn(`[Copilot] Responses API failed for ${this.model}, falling back to chat/completions: ${err.message}`);
-          this._responsesApiFailed = true;
-          // Fall through to chat/completions below
-        } else {
-          throw err;
-        }
+
+        if (CopilotProvider.isModelNotSupported(err)) throw err;
+
+        console.warn(`[Copilot] Responses API failed for ${this.model}, falling back to chat/completions: ${err.message}`);
+        this._responsesApiFailed = true;
+        _copilotResponsesUnsupported.add(this.model);
+
       }
     }
 
@@ -1134,16 +1737,28 @@ export class CopilotProvider implements LLMProvider {
       'Openai-Intent': 'conversation-panel',
     };
 
-    const formattedMessages = messages.map(m => formatOpenAIMessage(m));
+    let formattedMessages = messages.map(m => formatOpenAIMessage(m));
 
-    // Helper: make a single chat/completions call with given tool_choice
+
+    const toolsSize = tools && tools.length > 0 ? JSON.stringify(tools).length : 0;
+    const msgsSize = JSON.stringify(formattedMessages).length;
+    if (msgsSize + toolsSize > this.getPayloadBudget()) {
+      console.warn(`[Copilot] Total payload too large (msgs=${(msgsSize / 1024).toFixed(0)}KB + tools=${(toolsSize / 1024).toFixed(0)}KB) — trimming old tool results`);
+      formattedMessages = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
+    }
+
+
     const doCall = async (toolChoice: string): Promise<any> => {
       const body: Record<string, any> = {
         model: effectiveModel,
         messages: formattedMessages,
-        temperature: options?.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? 16384,
+        max_tokens: options?.maxTokens ?? 8192,
       };
+
+      const skipTemp = this.model.startsWith('o') || this.model.includes('claude') || this._temperatureUnsupported;
+      if (!skipTemp) {
+        body.temperature = options?.temperature ?? 0.7;
+      }
       if (tools && tools.length > 0) {
         body.tools = tools;
         body.tool_choice = toolChoice;
@@ -1152,32 +1767,79 @@ export class CopilotProvider implements LLMProvider {
       const bodySize = Buffer.byteLength(bodyJson, 'utf8');
       console.log(`[Copilot] chat request: model=${effectiveModel}, messages=${messages.length}, tools=${tools?.length || 0}, tool_choice=${toolChoice}, bodySize=${(bodySize / 1024).toFixed(1)}KB`);
 
-      const resp = await fetch('https://api.githubcopilot.com/chat/completions', {
-        method: 'POST',
+            const resp = await fetch('https://api.githubcopilot.com/chat/completions', {
+                method: 'POST',
         headers: copilotHeaders,
         body: bodyJson,
       });
 
       if (!resp.ok) {
         const errBody = await resp.text();
-        console.error(`[Copilot] ERROR ${resp.status}: ${errBody.slice(0, 500)}`);
+        console.error(`[Copilot] ERROR ${resp.status}: ${errBody.slice(0, 2000)}`);
+
+        if (resp.status === 400 && errBody.includes('Unsupported parameter')) {
+          const paramMatch = errBody.match(/Unsupported parameter:\s*'(\w+)'/);
+          if (paramMatch) {
+            const badParam = paramMatch[1];
+            console.warn(`[Copilot] Model ${effectiveModel} rejects '${badParam}' — retrying without it`);
+            if (badParam === 'temperature') this._temperatureUnsupported = true;
+            delete body[badParam];
+                        const retryResp = await fetch('https://api.githubcopilot.com/chat/completions', {
+                            method: 'POST',
+              headers: copilotHeaders,
+              body: JSON.stringify(body),
+            });
+            if (retryResp.ok) return retryResp.json();
+            const retryErr = await retryResp.text();
+            throw new Error(`Copilot LLM request failed (${retryResp.status}): ${retryErr}`);
+          }
+        }
+
+        if (CopilotProvider.RETRYABLE_5XX.has(resp.status)) {
+
+          console.warn(`[Copilot] ${resp.status} server error — L1 trim + retry in 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          body.messages = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
+                    const retry1 = await fetch('https://api.githubcopilot.com/chat/completions', {
+                        method: 'POST',
+            headers: copilotHeaders,
+            body: JSON.stringify(body),
+          });
+          if (retry1.ok) return retry1.json();
+
+          console.warn(`[Copilot] L1 retry failed (${retry1.status}) — L2 aggressive trim + drop old messages in 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          const trimmedMsgs = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
+          const system = trimmedMsgs[0];
+          const recent = trimmedMsgs.slice(-11);
+          body.messages = [system, { role: 'user', content: '[Context trimmed to fit limits. Continue from current state.]' }, ...recent];
+                    const retry2 = await fetch('https://api.githubcopilot.com/chat/completions', {
+                        method: 'POST',
+            headers: copilotHeaders,
+            body: JSON.stringify(body),
+          });
+          if (retry2.ok) return retry2.json();
+          const retryErr = await retry2.text();
+          console.error(`[Copilot] 5xx L2 retry also failed (${retry2.status}): ${retryErr.slice(0, 2000)}`);
+          throw new Error(`Copilot LLM request failed (${retry2.status}): ${retryErr}`);
+        }
         if (resp.status === 401 || resp.status === 403) {
           this.copilotToken = null;
           this.copilotTokenExpiresAt = 0;
         }
         throw new Error(`Copilot LLM request failed (${resp.status}): ${errBody}`);
-      }  
+      }
 
       return resp.json();
     };
 
-    // First attempt with tool_choice=auto
+
     let rawJson = await doCall('auto');
     let choice0 = rawJson.choices?.[0];
     let msg0 = choice0?.message;
     console.log(`[Copilot] response: model=${effectiveModel}, content=${(msg0?.content || '').slice(0, 80)}, tool_calls=${msg0?.tool_calls?.length || 0}, finish_reason=${choice0?.finish_reason || 'N/A'}`);
 
-    // Detect broken tool calling: finish_reason=tool_calls but tool_calls is empty
+
     const isBrokenToolCall = (c: any, m: any) => {
       const fr = c?.finish_reason;
       const present = m?.tool_calls && m.tool_calls.length > 0;
@@ -1187,7 +1849,7 @@ export class CopilotProvider implements LLMProvider {
     if (isBrokenToolCall(choice0, msg0) && hasTools) {
       console.warn(`[Copilot] ${effectiveModel} returned broken tool_calls (empty array). Retrying with tool_choice=required...`);
 
-      // Retry with tool_choice=required to force tool call generation
+
       try {
         rawJson = await doCall('required');
         choice0 = rawJson.choices?.[0];
@@ -1197,7 +1859,7 @@ export class CopilotProvider implements LLMProvider {
         console.warn(`[Copilot] retry with tool_choice=required failed: ${retryErr.message}`);
       }
 
-      // If still broken after retry, try extracting tool calls from content text
+
       if (isBrokenToolCall(choice0, msg0) || !(msg0?.tool_calls?.length > 0)) {
         const contentText = msg0?.content || '';
         const extracted = extractToolCallsFromContent(contentText, tools || []);
@@ -1209,7 +1871,7 @@ export class CopilotProvider implements LLMProvider {
             usage: rawJson.usage ? { promptTokens: rawJson.usage.prompt_tokens, completionTokens: rawJson.usage.completion_tokens } : undefined,
           };
         }
-        // Last resort: return content-only, agent-runner nudge will re-prompt
+
         console.warn(`[Copilot] ${effectiveModel} tool_calls broken after retry — returning content-only`);
         return { content: contentText, usage: rawJson.usage ? { promptTokens: rawJson.usage.prompt_tokens, completionTokens: rawJson.usage.completion_tokens } : undefined };
       }
@@ -1221,6 +1883,37 @@ export class CopilotProvider implements LLMProvider {
 
   async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
     messages = messages.filter(m => m && m.role);
+    try {
+      yield* this._streamInternal(messages, tools, options);
+      return;
+    } catch (err: any) {
+      if (!CopilotProvider.isModelNotSupported(err)) throw err;
+
+      _copilotUnsupportedModels.add(this.model);
+      const originalModel = this.model;
+      for (const fallback of COPILOT_MODEL_FALLBACK) {
+        if (fallback === originalModel || _copilotUnsupportedModels.has(fallback)) continue;
+        console.warn(`[Copilot] Stream: model "${originalModel}" not supported — trying fallback: ${fallback}`);
+        this.model = fallback;
+        this._responsesApiFailed = false;
+        try {
+          yield* this._streamInternal(messages, tools, options);
+          console.log(`[Copilot] Stream fallback to "${fallback}" succeeded`);
+          return;
+        } catch (fbErr: any) {
+          if (CopilotProvider.isModelNotSupported(fbErr)) {
+            _copilotUnsupportedModels.add(fallback);
+            continue;
+          }
+          throw fbErr;
+        }
+      }
+      this.model = originalModel;
+      throw err;
+    }
+  }
+
+  private async *_streamInternal(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
     const token = await this.getCopilotToken();
     const hasTools = !!(tools && tools.length > 0);
     const effectiveModel = this.getEffectiveModel(hasTools);
@@ -1230,23 +1923,35 @@ export class CopilotProvider implements LLMProvider {
         yield* this.streamViaResponses(token, messages, tools, options);
         return;
       } catch (err: any) {
-        if (!RESPONSES_ONLY_MODELS.has(this.model)) {
-          console.warn(`[Copilot] Responses API stream failed for ${this.model}, falling back to chat/completions: ${err.message}`);
-          this._responsesApiFailed = true;
-          // Fall through to chat/completions below
-        } else {
-          throw err;
-        }
+        if (CopilotProvider.isModelNotSupported(err)) throw err;
+        console.warn(`[Copilot] Responses API stream failed for ${this.model}, falling back to chat/completions: ${err.message}`);
+        this._responsesApiFailed = true;
+        _copilotResponsesUnsupported.add(this.model);
+
       }
+    }
+
+    let streamMessages = messages.map(m => formatOpenAIMessage(m));
+
+
+    const toolsSize = tools && tools.length > 0 ? JSON.stringify(tools).length : 0;
+    const msgsSize = JSON.stringify(streamMessages).length;
+    if (msgsSize + toolsSize > this.getPayloadBudget()) {
+      console.warn(`[Copilot] Stream payload too large (msgs=${(msgsSize / 1024).toFixed(0)}KB + tools=${(toolsSize / 1024).toFixed(0)}KB) — trimming old tool results`);
+      streamMessages = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
     }
 
     const body: Record<string, any> = {
       model: effectiveModel,
-      messages: messages.map(m => formatOpenAIMessage(m)),
-      temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens ?? 4096,
+      messages: streamMessages,
+      max_tokens: options?.maxTokens ?? 8192,
       stream: true,
     };
+
+    const skipTemp = this.model.startsWith('o') || this.model.includes('claude') || this._temperatureUnsupported;
+    if (!skipTemp) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
     if (tools && tools.length > 0) {
       body.tools = tools;
       body.tool_choice = 'auto';
@@ -1255,8 +1960,8 @@ export class CopilotProvider implements LLMProvider {
     const bodyJson = JSON.stringify(body);
     console.log(`[Copilot] stream request: model=${effectiveModel}, messages=${messages.length}, tools=${tools?.length || 0}, bodySize=${(Buffer.byteLength(bodyJson, 'utf8') / 1024).toFixed(1)}KB`);
 
-    const response = await fetch('https://api.githubcopilot.com/chat/completions', {
-      method: 'POST',
+        const response = await fetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
@@ -1271,6 +1976,74 @@ export class CopilotProvider implements LLMProvider {
     if (!response.ok) {
       const errBody = await response.text();
       console.error(`[Copilot] STREAM ERROR ${response.status}: ${errBody.slice(0, 500)}`);
+      if (response.status === 400 && errBody.includes('Unsupported parameter')) {
+        const paramMatch = errBody.match(/Unsupported parameter:\s*'(\w+)'/);
+        if (paramMatch) {
+          const badParam = paramMatch[1];
+          console.warn(`[Copilot] stream: Model ${effectiveModel} rejects '${badParam}' — marking and retrying`);
+          if (badParam === 'temperature') this._temperatureUnsupported = true;
+          delete body[badParam];
+                    const retryResp = await fetch('https://api.githubcopilot.com/chat/completions', {
+                        method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'Editor-Version': 'vscode/1.96.0',
+              'Copilot-Integration-Id': 'vscode-chat',
+              'Openai-Organization': 'github-copilot',
+              'Openai-Intent': 'conversation-panel',
+            },
+            body: JSON.stringify(body),
+          });
+          if (retryResp.ok) {
+            yield* streamOpenAIResponse(retryResp);
+            return;
+          }
+        }
+      }
+
+      if (CopilotProvider.RETRYABLE_5XX.has(response.status)) {
+        const streamHeaders = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Editor-Version': 'vscode/1.96.0',
+          'Copilot-Integration-Id': 'vscode-chat',
+          'Openai-Organization': 'github-copilot',
+          'Openai-Intent': 'conversation-panel',
+        };
+
+        console.warn(`[Copilot] stream ${response.status} server error — L1 trim + retry in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        body.messages = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
+                const retry1 = await fetch('https://api.githubcopilot.com/chat/completions', {
+                    method: 'POST',
+          headers: streamHeaders,
+          body: JSON.stringify(body),
+        });
+        if (retry1.ok) {
+          yield* streamOpenAIResponse(retry1);
+          return;
+        }
+
+        console.warn(`[Copilot] stream L1 retry failed (${retry1.status}) — L2 aggressive trim in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        const trimmedMsgs = this.trimMessagesForPayload(messages).map(m => formatOpenAIMessage(m));
+        const system = trimmedMsgs[0];
+        const recent = trimmedMsgs.slice(-11);
+        body.messages = [system, { role: 'user', content: '[Context trimmed to fit limits.]' }, ...recent];
+                const retry2 = await fetch('https://api.githubcopilot.com/chat/completions', {
+                    method: 'POST',
+          headers: streamHeaders,
+          body: JSON.stringify(body),
+        });
+        if (retry2.ok) {
+          yield* streamOpenAIResponse(retry2);
+          return;
+        }
+        const retryErr = await retry2.text();
+        console.error(`[Copilot] stream 5xx L2 retry also failed (${retry2.status}): ${retryErr.slice(0, 300)}`);
+        throw new Error(`Copilot LLM stream failed (${retry2.status}): ${retryErr}`);
+      }
       if (response.status === 401 || response.status === 403) {
         this.copilotToken = null;
         this.copilotTokenExpiresAt = 0;
@@ -1281,7 +2054,6 @@ export class CopilotProvider implements LLMProvider {
     yield* streamOpenAIResponse(response);
   }
 
-  // ── Responses API (/responses) for newer models ──
 
   private copilotHeaders(token: string): Record<string, string> {
     return {
@@ -1294,18 +2066,15 @@ export class CopilotProvider implements LLMProvider {
     };
   }
 
-  /**
-   * Convert LLMMessage[] + LLMTool[] into OpenAI Responses API format.
-   * The Responses API uses `input` (array of items) instead of `messages`.
-   */
-  private buildResponsesBody(
+private buildResponsesBody(
     messages: LLMMessage[],
     tools?: LLMTool[],
     options?: Record<string, any>,
     stream = false,
   ): Record<string, any> {
+    messages = messages.filter(m => m && m.role);
     const input: any[] = [];
-    // Responses API enforces: id must start with 'fc', max 64 chars, only [a-zA-Z0-9_-]
+
     const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_');
     const idMap = new Map<string, string>();
     let idCounter = 0;
@@ -1313,7 +2082,7 @@ export class CopilotProvider implements LLMProvider {
       if (!original) return `fc_${idCounter++}`;
       if (idMap.has(original)) return idMap.get(original)!;
       const clean = sanitize(original);
-      // Ensure 'fc' prefix as required by Responses API
+
       const prefixed = clean.startsWith('fc') ? clean : `fc_${clean}`;
       if (prefixed.length <= 64) { idMap.set(original, prefixed); return prefixed; }
       const short = `fc_${idCounter++}_${clean.slice(0, 52)}`;
@@ -1323,17 +2092,17 @@ export class CopilotProvider implements LLMProvider {
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        // System messages become developer instructions
+
         input.push({ role: 'developer', content: msg.content });
       } else if (msg.role === 'tool') {
-        // Tool results
+
         input.push({
           type: 'function_call_output',
           call_id: shortId(msg.toolCallId || ''),
           output: msg.content,
         });
       } else if (msg.role === 'assistant' && msg.toolCalls?.length) {
-        // Assistant with tool calls → emit both message + function_call items
+
         if (msg.content) {
           input.push({ role: 'assistant', content: msg.content });
         }
@@ -1346,34 +2115,90 @@ export class CopilotProvider implements LLMProvider {
             arguments: tc.function.arguments,
           });
         }
+      } else if (msg.role === 'user' && msg.image) {
+
+        const mimeMatch = msg.image.match(/^data:(image\/[^;]+);base64,/);
+        const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const base64 = msg.image.replace(/^data:image\/[^;]+;base64,/, '');
+        input.push({
+          role: 'user',
+          content: [
+            { type: 'input_text', text: msg.content || '' },
+            { type: 'input_image', image_url: `data:${mime};base64,${base64}` },
+          ],
+        });
       } else {
         input.push({ role: msg.role, content: msg.content });
       }
     }
 
+
+    const knownCallIds = new Set(
+      input.filter((item: any) => item.type === 'function_call').map((item: any) => item.call_id)
+    );
+    const repairedInput = input.filter((item: any) => {
+      if (item.type === 'function_call_output' && !knownCallIds.has(item.call_id)) {
+        return false;
+      }
+      return true;
+    });
+
     const body: Record<string, any> = {
       model: this.model,
-      input,
+      input: repairedInput,
     };
 
-    // o-series reasoning models don't support temperature
-    if (!this.model.startsWith('o')) {
-      body.temperature = options?.temperature ?? 0.7;
-    }
-    body.max_output_tokens = options?.maxTokens ?? 16384;
+
+    body.max_output_tokens = options?.maxTokens ?? 8192;
 
     if (tools && tools.length > 0) {
-      body.tools = tools.map(t => ({
-        type: 'function',
-        name: t.function.name,
-        description: t.function.description,
-        parameters: t.function.parameters,
-      }));
+      body.tools = tools.map(t => {
+        const params = t.function.parameters;
+
+
+        let compactParams = params;
+        if (params && typeof params === 'object') {
+          compactParams = this.compactParamSchema(params);
+        }
+        return {
+          type: 'function',
+          name: t.function.name,
+          description: t.function.description,
+          parameters: compactParams,
+        };
+      });
     }
 
     if (stream) body.stream = true;
 
     return body;
+  }
+
+private sanitizeResponsesBody(body: Record<string, any>): void {
+    const KNOWN_FIELDS = new Set([
+      'model', 'input', 'tools', 'stream', 'max_output_tokens',
+      'temperature', 'top_p', 'tool_choice', 'previous_response_id',
+      'truncation', 'instructions',
+    ]);
+    for (const key of Object.keys(body)) {
+      if (!KNOWN_FIELDS.has(key)) {
+        console.warn(`[Copilot/Responses] Stripping unknown body field '${key}' before retry`);
+        delete body[key];
+      }
+    }
+  }
+
+private getPayloadBudget(): number {
+
+    const m = this.model.toLowerCase();
+    let contextTokens = 128_000;
+    if (m.includes('claude') || m.includes('gemini')) contextTokens = 200_000;
+    else if (m.includes('gpt-3.5') || m.includes('mixtral')) contextTokens = 32_000;
+
+    const tokenBudget = Math.floor(contextTokens * 0.8);
+    const byteBudget = tokenBudget * 4;
+
+    return Math.min(Math.max(byteBudget, CopilotProvider.MAX_PAYLOAD_BYTES), 800 * 1024);
   }
 
   private async chatViaResponses(
@@ -1382,30 +2207,206 @@ export class CopilotProvider implements LLMProvider {
     tools?: LLMTool[],
     options?: Record<string, any>,
   ): Promise<LLMResponse> {
-    const body = this.buildResponsesBody(messages, tools, options);
+
+
+    let body: Record<string, any>;
+    const fullBody = this.buildResponsesBody(messages, tools, options);
+
+    if (!this._chainingUnsupported && this._lastResponseId && this._lastResponseMsgCount > 0 && messages.length > this._lastResponseMsgCount) {
+
+      const newMessages = messages.slice(this._lastResponseMsgCount);
+      const deltaBody = this.buildResponsesBody(newMessages, tools, options);
+      deltaBody.previous_response_id = this._lastResponseId;
+
+
+      const curToolNames = new Set((tools || []).map(t => t.function.name));
+      const toolsChanged = this._lastSentToolNames.size !== curToolNames.size ||
+        [...curToolNames].some(n => !this._lastSentToolNames.has(n)) ||
+        [...this._lastSentToolNames].some(n => !curToolNames.has(n));
+      if (!toolsChanged) {
+        delete deltaBody.tools;
+      } else {
+        console.log(`[Copilot/Responses] Tool set changed — resending tools with chained request`);
+      }
+      body = deltaBody;
+      console.log(`[Copilot/Responses] Using previous_response_id chaining: ${messages.length - this._lastResponseMsgCount} new messages (saved ${this._lastResponseMsgCount} from history)`);
+    } else {
+      body = fullBody;
+    }
+
+    this._lastSentToolNames = new Set((tools || []).map(t => t.function.name));
+
+
+    if (body.input.length > CopilotProvider.MAX_INPUT_ITEMS) {
+      console.warn(`[Copilot/Responses] Input items ${body.input.length} > ${CopilotProvider.MAX_INPUT_ITEMS} — truncating`);
+      body.input = this.truncateInput(body.input, CopilotProvider.MAX_INPUT_ITEMS);
+    }
+
+
+    const payloadBudget = this.getPayloadBudget();
+    let estimatedSize = JSON.stringify(body).length;
+    if (estimatedSize > payloadBudget) {
+      console.warn(`[Copilot/Responses] Body too large (${(estimatedSize / 1024).toFixed(0)}KB > ${(payloadBudget / 1024).toFixed(0)}KB budget) — trimming old function outputs`);
+      body.input = this.trimInputForPayload(body.input);
+      let recheck = JSON.stringify(body).length;
+
+      if (recheck > payloadBudget) {
+        this.pruneToolsForPayload(body, 1);
+        recheck = JSON.stringify(body).length;
+      }
+
+      if (recheck > payloadBudget) {
+        console.warn(`[Copilot/Responses] Still too large after L1 trim (${(recheck / 1024).toFixed(0)}KB) — aggressive trim`);
+        body.input = this.trimInputForPayload(body.input, true);
+        this.pruneToolsForPayload(body, 2);
+        for (let keep = 16; keep >= 4; keep -= 4) {
+          body.input = this.truncateInput(body.input, keep);
+          recheck = JSON.stringify(body).length;
+          if (recheck <= payloadBudget) break;
+          console.warn(`[Copilot/Responses] Still ${(recheck / 1024).toFixed(0)}KB after truncate(${keep}) — reducing further`);
+        }
+      }
+    }
+
+
     const bodyJson = JSON.stringify(body);
     const bodySize = Buffer.byteLength(bodyJson, 'utf8');
-    console.log(`[Copilot/Responses] chat request: model=${this.model}, input=${body.input.length}, tools=${tools?.length || 0}, bodySize=${(bodySize / 1024).toFixed(1)}KB`);
+    console.log(`[Copilot/Responses] chat request: model=${this.model}, input=${body.input.length}, tools=${tools?.length || 0}, bodySize=${(bodySize / 1024).toFixed(1)}KB${body.previous_response_id ? ', chained' : ''}`);
 
-    const response = await fetch('https://api.githubcopilot.com/responses', {
-      method: 'POST',
+        let response = await fetch('https://api.githubcopilot.com/responses', {
+            method: 'POST',
       headers: this.copilotHeaders(token),
       body: bodyJson,
     });
 
+
+    if (!response.ok && body.previous_response_id) {
+      const errText = await response.text();
+      console.warn(`[Copilot/Responses] Chained request failed (${response.status}): ${errText.slice(0, 200)} — falling back to full body`);
+      this._lastResponseId = null;
+      this._lastResponseMsgCount = 0;
+
+      if (errText.includes('previous_response_id is not supported') || errText.includes('unsupported_value')) {
+        this._chainingUnsupported = true;
+        console.warn(`[Copilot/Responses] previous_response_id not supported — disabling chaining permanently`);
+      }
+
+      const fallbackBody = fullBody;
+      if (fallbackBody.input.length > CopilotProvider.MAX_INPUT_ITEMS) {
+        fallbackBody.input = this.truncateInput(fallbackBody.input, CopilotProvider.MAX_INPUT_ITEMS);
+      }
+      let fbSize = JSON.stringify(fallbackBody).length;
+      const fallbackBudget = this.getPayloadBudget();
+      if (fbSize > fallbackBudget) {
+        fallbackBody.input = this.trimInputForPayload(fallbackBody.input);
+        this.pruneToolsForPayload(fallbackBody, 1);
+        fbSize = JSON.stringify(fallbackBody).length;
+        if (fbSize > fallbackBudget) {
+          fallbackBody.input = this.trimInputForPayload(fallbackBody.input, true);
+          this.pruneToolsForPayload(fallbackBody, 2);
+          for (let keep = 16; keep >= 4; keep -= 4) {
+            fallbackBody.input = this.truncateInput(fallbackBody.input, keep);
+            fbSize = JSON.stringify(fallbackBody).length;
+            if (fbSize <= fallbackBudget) break;
+          }
+        }
+      }
+      console.log(`[Copilot/Responses] Fallback: full body with ${fallbackBody.input.length} input items`);
+            response = await fetch('https://api.githubcopilot.com/responses', {
+                method: 'POST',
+        headers: this.copilotHeaders(token),
+        body: JSON.stringify(fallbackBody),
+      });
+      Object.assign(body, fallbackBody);
+      delete body.previous_response_id;
+    }
+
     if (!response.ok) {
       const errBody = await response.text();
-      console.error(`[Copilot/Responses] ERROR ${response.status}: ${errBody.slice(0, 500)}`);
+      console.error(`[Copilot/Responses] ERROR ${response.status}: ${errBody.slice(0, 2000)}`);
+
+      if (response.status === 400 && errBody.includes('Unsupported parameter')) {
+
+        const paramMatch = errBody.match(/Unsupported parameter:\s*'(\w+)'/);
+        if (paramMatch) {
+          const badParam = paramMatch[1];
+          console.warn(`[Copilot/Responses] Model ${this.model} rejects '${badParam}' — retrying without it`);
+          if (badParam === 'temperature') this._temperatureUnsupported = true;
+          delete body[badParam];
+                    const retryResp = await fetch('https://api.githubcopilot.com/responses', {
+                        method: 'POST',
+            headers: this.copilotHeaders(token),
+            body: JSON.stringify(body),
+          });
+          if (retryResp.ok) {
+            const retryData = await retryResp.json() as any;
+            return this.parseResponsesResult(retryData);
+          }
+          const retryErr = await retryResp.text();
+          throw new Error(`Copilot Responses API failed (${retryResp.status}): ${retryErr}`);
+        }
+      }
       if (response.status === 401 || response.status === 403) {
         this.copilotToken = null;
         this.copilotTokenExpiresAt = 0;
+      }
+
+      if (CopilotProvider.RETRYABLE_5XX.has(response.status)) {
+
+        this.sanitizeResponsesBody(body);
+
+        console.warn(`[Copilot/Responses] ${response.status} server error — L1 sanitize + trim + tool prune + retry in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        body.input = this.trimInputForPayload(body.input);
+        this.pruneToolsForPayload(body, 1);
+                const retry1 = await fetch('https://api.githubcopilot.com/responses', {
+                    method: 'POST',
+          headers: this.copilotHeaders(token),
+          body: JSON.stringify(body),
+        });
+        if (retry1.ok) {
+          const retryData = await retry1.json() as any;
+          return this.parseResponsesResult(retryData);
+        }
+
+        console.warn(`[Copilot/Responses] L1 retry failed (${retry1.status}) — L2 aggressive trim + prune tools + truncate + retry in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        body.input = this.trimInputForPayload(body.input, true);
+        this.pruneToolsForPayload(body, 2);
+
+        for (let keep = 16; keep >= 4; keep -= 4) {
+          body.input = this.truncateInput(body.input, keep);
+          const l2size = JSON.stringify(body).length;
+          if (l2size <= this.getPayloadBudget()) break;
+          console.warn(`[Copilot/Responses] L2 still ${(l2size / 1024).toFixed(0)}KB after truncate(${keep}) — reducing further`);
+        }
+                const retry2 = await fetch('https://api.githubcopilot.com/responses', {
+                    method: 'POST',
+          headers: this.copilotHeaders(token),
+          body: JSON.stringify(body),
+        });
+        if (retry2.ok) {
+          const retryData = await retry2.json() as any;
+          return this.parseResponsesResult(retryData);
+        }
+        const retryErr = await retry2.text();
+        console.error(`[Copilot/Responses] 5xx L2 retry also failed (${retry2.status}): ${retryErr.slice(0, 2000)}`);
+        throw new Error(`Copilot Responses API failed (${retry2.status}): ${retryErr}`);
       }
       throw new Error(`Copilot Responses API failed (${response.status}): ${errBody}`);
     }
 
     const data = await response.json() as any;
     const parsed = this.parseResponsesResult(data);
-    console.log(`[Copilot/Responses] response: content=${(parsed.content || '').slice(0, 100)}, toolCalls=${parsed.toolCalls?.length || 0}, outputItems=${data.output?.length || 0}`);
+
+
+    if (data.id) {
+      this._lastResponseId = data.id;
+      this._lastResponseMsgCount = messages.length;
+      console.log(`[Copilot/Responses] Stored response ID for chaining: ${data.id.slice(0, 20)}...`);
+    }
+
+    console.log(`[Copilot/Responses] response: content=${(parsed.content || '').slice(0, 100)}, toolCalls=${parsed.toolCalls?.length || 0}, outputItems=${data.output?.length || 0}, usage=${parsed.usage ? parsed.usage.promptTokens + '+' + parsed.usage.completionTokens : 'NONE'}`);
     return parsed;
   }
 
@@ -1416,23 +2417,114 @@ export class CopilotProvider implements LLMProvider {
     options?: Record<string, any>,
   ): AsyncGenerator<LLMStreamChunk> {
     const body = this.buildResponsesBody(messages, tools, options, true);
+
+
+    if (body.input.length > CopilotProvider.MAX_INPUT_ITEMS) {
+      console.warn(`[Copilot/Responses] stream input items ${body.input.length} > ${CopilotProvider.MAX_INPUT_ITEMS} — truncating`);
+      body.input = this.truncateInput(body.input, CopilotProvider.MAX_INPUT_ITEMS);
+    }
+
+
+    const streamBudget = this.getPayloadBudget();
+    let estimatedSize = JSON.stringify(body).length;
+    if (estimatedSize > streamBudget) {
+      console.warn(`[Copilot/Responses] stream body too large (${(estimatedSize / 1024).toFixed(0)}KB > ${(streamBudget / 1024).toFixed(0)}KB budget) — trimming old function outputs`);
+      body.input = this.trimInputForPayload(body.input);
+      let recheck = JSON.stringify(body).length;
+      if (recheck > streamBudget) {
+        this.pruneToolsForPayload(body, 1);
+        recheck = JSON.stringify(body).length;
+      }
+      if (recheck > streamBudget) {
+        console.warn(`[Copilot/Responses] stream still too large after L1 (${(recheck / 1024).toFixed(0)}KB) — aggressive trim`);
+        body.input = this.trimInputForPayload(body.input, true);
+        this.pruneToolsForPayload(body, 2);
+        for (let keep = 16; keep >= 4; keep -= 4) {
+          body.input = this.truncateInput(body.input, keep);
+          recheck = JSON.stringify(body).length;
+          if (recheck <= streamBudget) break;
+          console.warn(`[Copilot/Responses] stream still ${(recheck / 1024).toFixed(0)}KB after truncate(${keep}) — reducing further`);
+        }
+      }
+    }
+
     const bodyJson = JSON.stringify(body);
     console.log(`[Copilot/Responses] stream request: model=${this.model}, input=${body.input.length}, tools=${tools?.length || 0}, bodySize=${(Buffer.byteLength(bodyJson, 'utf8') / 1024).toFixed(1)}KB`);
 
-    const response = await fetch('https://api.githubcopilot.com/responses', {
-      method: 'POST',
+        let response = await fetch('https://api.githubcopilot.com/responses', {
+            method: 'POST',
       headers: this.copilotHeaders(token),
       body: bodyJson,
     });
 
     if (!response.ok) {
       const errBody = await response.text();
-      console.error(`[Copilot/Responses] STREAM ERROR ${response.status}: ${errBody.slice(0, 500)}`);
-      if (response.status === 401 || response.status === 403) {
-        this.copilotToken = null;
-        this.copilotTokenExpiresAt = 0;
+      console.error(`[Copilot/Responses] STREAM ERROR ${response.status}: ${errBody.slice(0, 2000)}`);
+      if (response.status === 400 && errBody.includes('Unsupported parameter')) {
+        const paramMatch = errBody.match(/Unsupported parameter:\s*'(\w+)'/);
+        if (paramMatch) {
+          const badParam = paramMatch[1];
+          console.warn(`[Copilot/Responses] stream: Model ${this.model} rejects '${badParam}' — marking and retrying`);
+          if (badParam === 'temperature') this._temperatureUnsupported = true;
+          delete body[badParam];
+                    response = await fetch('https://api.githubcopilot.com/responses', {
+                        method: 'POST',
+            headers: this.copilotHeaders(token),
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) {
+            const retryErr = await response.text();
+            throw new Error(`Copilot Responses stream failed (${response.status}): ${retryErr}`);
+          }
+
+        } else {
+          throw new Error(`Copilot Responses stream failed (${response.status}): ${errBody}`);
+        }
+      } else if (CopilotProvider.RETRYABLE_5XX.has(response.status)) {
+
+        this.sanitizeResponsesBody(body);
+        console.warn(`[Copilot/Responses] stream ${response.status} server error — L1 sanitize + trim + tool prune + retry in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        body.input = this.trimInputForPayload(body.input);
+        this.pruneToolsForPayload(body, 1);
+        body.stream = true;
+                response = await fetch('https://api.githubcopilot.com/responses', {
+                    method: 'POST',
+          headers: this.copilotHeaders(token),
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+
+          console.warn(`[Copilot/Responses] stream L1 retry failed (${response.status}) — L2 aggressive trim + prune tools + retry in 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          body.input = this.trimInputForPayload(body.input, true);
+          this.pruneToolsForPayload(body, 2);
+          for (let keep = 16; keep >= 4; keep -= 4) {
+            body.input = this.truncateInput(body.input, keep);
+            const l2size = JSON.stringify(body).length;
+            if (l2size <= this.getPayloadBudget()) break;
+            console.warn(`[Copilot/Responses] stream L2 still ${(l2size / 1024).toFixed(0)}KB after truncate(${keep}) — reducing further`);
+          }
+          body.stream = true;
+                    response = await fetch('https://api.githubcopilot.com/responses', {
+                        method: 'POST',
+            headers: this.copilotHeaders(token),
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) {
+            const retryErr = await response.text();
+            console.error(`[Copilot/Responses] stream 5xx L2 retry also failed (${response.status}): ${retryErr.slice(0, 2000)}`);
+            throw new Error(`Copilot Responses stream failed (${response.status}): ${retryErr}`);
+          }
+        }
+
+      } else {
+        if (response.status === 401 || response.status === 403) {
+          this.copilotToken = null;
+          this.copilotTokenExpiresAt = 0;
+        }
+        throw new Error(`Copilot Responses stream failed (${response.status}): ${errBody}`);
       }
-      throw new Error(`Copilot Responses stream failed (${response.status}): ${errBody}`);
     }
 
     const reader = response.body?.getReader();
@@ -1486,8 +2578,9 @@ export class CopilotProvider implements LLMProvider {
               tc.args += evt.delta || '';
             } else if (type === 'response.output_item.added' && evt.item?.type === 'function_call') {
               const item = evt.item;
+              const sanitizedId = sanitizeToolId(item.id || item.call_id || '');
               toolCalls.set(item.id || item.call_id, {
-                id: item.id || item.call_id,
+                id: sanitizedId,
                 name: item.name || '',
                 args: item.arguments || '',
               });
@@ -1505,14 +2598,14 @@ export class CopilotProvider implements LLMProvider {
                 completionTokens: u.output_tokens || 0,
               };
             }
-          } catch { /* skip malformed SSE */ }
+          } catch {  }
         }
       }
     } finally {
       reader.releaseLock();
     }
 
-    // Flush remaining
+
     if (toolCalls.size > 0) {
       yield {
         toolCalls: Array.from(toolCalls.values()).map(tc => ({
@@ -1526,10 +2619,7 @@ export class CopilotProvider implements LLMProvider {
     }
   }
 
-  /**
-   * Parse a non-streaming Responses API result into LLMResponse.
-   */
-  private parseResponsesResult(data: any): LLMResponse {
+private parseResponsesResult(data: any): LLMResponse {
     let content = '';
     const toolCalls: LLMToolCall[] = [];
 
@@ -1540,8 +2630,10 @@ export class CopilotProvider implements LLMProvider {
           else if (part.text) content += part.text;
         }
       } else if (item.type === 'function_call') {
+
+        const fcId = sanitizeToolId(item.id || item.call_id || '');
         toolCalls.push({
-          id: item.id || item.call_id || `fc_${Date.now()}`,
+          id: fcId,
           function: {
             name: item.name,
             arguments: item.arguments || '{}',
@@ -1561,461 +2653,6 @@ export class CopilotProvider implements LLMProvider {
   }
 }
 
-// =====================================================
-// Cursor API provider
-// Uses Cursor API key auth, independent from GitHub Copilot OAuth
-// =====================================================
-
-export class CursorProvider implements LLMProvider {
-  private apiKey: string;
-  private baseUrl: string;
-  private model: string;
-
-  private static _cachedRepos: string[] | null = null;
-  private static _cachedReposAt = 0;
-  private static _workingSource: { repository: string; ref?: string } | null = null;
-
-  constructor(config: ModelConfig) {
-    this.model = config.model;
-    this.apiKey = config.apiKey || process.env.CURSOR_API_KEY || '';
-    this.baseUrl = 'https://api.cursor.com';
-  }
-
-  async chat(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): Promise<LLMResponse> {
-    const text = await this.runCloudAgent(messages, tools, options);
-    return { content: text };
-  }
-
-  async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
-    const text = await this.runCloudAgent(messages, tools, options);
-    if (text) yield { content: text, done: false };
-    yield { done: true };
-  }
-
-  private async requestCursor(method: 'GET' | 'POST' | 'DELETE', path: string, body?: Record<string, any>): Promise<Response> {
-    const token = await this.resolveCursorToken();
-    const url = `${this.baseUrl}${path}`;
-    const bodyJson = body ? JSON.stringify(body) : undefined;
-    const basic = Buffer.from(`${token}:`).toString('base64');
-    const mkHeaders = (auth: string): Record<string, string> => {
-      const h: Record<string, string> = { 'Authorization': auth };
-      if (body) h['Content-Type'] = 'application/json';
-      return h;
-    };
-
-    let response = await fetch(url, {
-      method,
-      headers: mkHeaders(`Basic ${basic}`),
-      body: bodyJson,
-    });
-    if (response.ok) return response;
-
-    if (response.status === 401 || response.status === 403) {
-      response = await fetch(url, {
-        method,
-        headers: mkHeaders(`Bearer ${token}`),
-        body: bodyJson,
-      });
-      if (response.ok) return response;
-    }
-
-    const errorBody = await response.text();
-    throw new Error(`Cursor API request failed (${response.status}): ${errorBody}`);
-  }
-
-  private buildAgentPrompt(
-    messages: LLMMessage[],
-    tools?: LLMTool[],
-  ): string {
-    const compact = messages
-      .filter(m => m && m.role && (m.content || m.toolCalls))
-      .slice(-24)
-      .map(m => {
-        if (m.role === 'assistant' && m.toolCalls?.length) {
-          return `[assistant_tool_calls]: ${m.toolCalls.map(tc => tc.function.name).join(', ')}`;
-        }
-        return `[${m.role}]: ${String(m.content || '').slice(0, 4000)}`;
-      })
-      .join('\n');
-
-    const toolHint = tools && tools.length > 0
-      ? `\n\nLocal tools exist in WhiteOwl, but Cursor Cloud Agents API cannot call local MCP/tools directly in this integration. Respond with best possible answer using text reasoning only.`
-      : '';
-
-    return `${compact}${toolHint}`.slice(0, 120000);
-  }
-
-  /**
-   * Fetch repositories accessible to the user through Cursor's own GitHub integration.
-   * Cached for 1 hour due to strict rate limits (1/min, 30/hr).
-   */
-  private async getCursorAccessibleRepos(): Promise<string[]> {
-    const now = Date.now();
-    if (CursorProvider._cachedRepos && now - CursorProvider._cachedReposAt < 3600000) {
-      return CursorProvider._cachedRepos;
-    }
-
-    try {
-      const resp = await this.requestCursor('GET', '/v0/repositories');
-      const data = await resp.json() as any;
-      const repos: string[] = (data.repositories || [])
-        .map((r: any) => r?.repository)
-        .filter(Boolean);
-      CursorProvider._cachedRepos = repos;
-      CursorProvider._cachedReposAt = now;
-      console.log(`[Cursor] Fetched ${repos.length} accessible repos from Cursor API`);
-      return repos;
-    } catch (err: any) {
-      console.log(`[Cursor] Failed to fetch repos from Cursor API: ${String(err?.message || '').slice(0, 120)}`);
-      return CursorProvider._cachedRepos || [];
-    }
-  }
-
-  /**
-   * Attempt to push an initial commit to the user's empty GitHub repos.
-   * This fixes the "Git Repository is empty" Cursor error.
-   * Returns true if at least one repo was successfully initialized.
-   */
-  private async tryInitializeEmptyRepos(): Promise<boolean> {
-    const mgr = getOAuthManager();
-    if (!mgr) return false;
-    const ghToken = await mgr.getToken('github');
-    if (!ghToken) return false;
-
-    const ghHeaders = {
-      'Authorization': `token ${ghToken}`,
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'WhiteOwl-CursorProvider',
-      'X-GitHub-Api-Version': '2022-11-28',
-    };
-
-    try {
-      const resp = await fetch('https://api.github.com/user/repos?per_page=10&sort=updated&direction=desc', {
-        headers: ghHeaders,
-      });
-      if (!resp.ok) return false;
-      const repos = await resp.json() as any[];
-
-      for (const repo of (repos || [])) {
-        if (!repo?.full_name) continue;
-        const branch = String(repo.default_branch || 'main');
-
-        const refResp = await fetch(`https://api.github.com/repos/${repo.full_name}/git/ref/heads/${branch}`, {
-          headers: ghHeaders,
-        });
-        if (refResp.ok) continue;
-
-        console.log(`[Cursor] Repo ${repo.full_name} is empty, attempting to initialize...`);
-        const ok = await this.initializeEmptyRepo(ghHeaders, repo.full_name, branch);
-        if (ok) {
-          console.log(`[Cursor] Successfully initialized ${repo.full_name}`);
-          return true;
-        }
-        console.log(`[Cursor] Failed to initialize ${repo.full_name} (OAuth may lack repo scope)`);
-      }
-    } catch { /* ignore */ }
-
-    try {
-      for (const name of ['whiteowl-cursor-chat', `whiteowl-cursor-${Date.now().toString(36)}`]) {
-        const createResp = await fetch('https://api.github.com/user/repos', {
-          method: 'POST',
-          headers: { ...ghHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            private: true,
-            auto_init: true,
-            description: 'Auto-provisioned for WhiteOwl Cursor API',
-          }),
-        });
-        if (createResp.ok) {
-          console.log(`[Cursor] Created new initialized repo: ${name}`);
-          return true;
-        }
-      }
-    } catch { /* ignore */ }
-
-    return false;
-  }
-
-  private async autoProvisionRepositoryFromGithubOAuth(): Promise<{ repository: string; ref?: string } | null> {
-    const mgr = getOAuthManager();
-    if (!mgr) return null;
-    const ghToken = await mgr.getToken('github');
-    if (!ghToken) return null;
-
-    const ghHeaders = {
-      'Authorization': `token ${ghToken}`,
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'WhiteOwl-CursorProvider',
-      'X-GitHub-Api-Version': '2022-11-28',
-    };
-
-    try {
-      const existingResp = await fetch('https://api.github.com/user/repos?per_page=10&sort=updated&direction=desc', {
-        headers: ghHeaders,
-      });
-      if (existingResp.ok) {
-        const repos = await existingResp.json() as any[];
-        for (const repo of (repos || [])) {
-          if (!repo?.html_url || !repo?.full_name) continue;
-          const branch = String(repo.default_branch || 'main');
-          try {
-            const refResp = await fetch(`https://api.github.com/repos/${repo.full_name}/git/ref/heads/${branch}`, {
-              headers: ghHeaders,
-            });
-            if (refResp.ok) {
-              return { repository: String(repo.html_url) };
-            }
-          } catch { /* skip */ }
-        }
-
-        const firstRepo = repos?.[0];
-        if (firstRepo?.full_name && firstRepo?.html_url) {
-          const branch = String(firstRepo.default_branch || 'main');
-          const initialized = await this.initializeEmptyRepo(ghHeaders, firstRepo.full_name, branch);
-          if (initialized) {
-            return { repository: String(firstRepo.html_url) };
-          }
-        }
-      }
-    } catch { /* ignore */ }
-
-    for (const name of ['whiteowl-cursor-chat', `whiteowl-cursor-${Date.now().toString(36)}`]) {
-      try {
-        const createResp = await fetch('https://api.github.com/user/repos', {
-          method: 'POST',
-          headers: { ...ghHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            private: true,
-            auto_init: true,
-            description: 'Auto-provisioned repository for WhiteOwl Cursor API chat',
-          }),
-        });
-        if (!createResp.ok) continue;
-        const created = await createResp.json() as any;
-        if (created?.html_url) {
-          await new Promise(r => setTimeout(r, 2000));
-          return { repository: String(created.html_url) };
-        }
-      } catch { /* next */ }
-    }
-
-    return null;
-  }
-
-  private async initializeEmptyRepo(
-    ghHeaders: Record<string, string>,
-    fullName: string,
-    branch: string,
-  ): Promise<boolean> {
-    try {
-      const content = Buffer.from('# WhiteOwl Cursor Chat\nAuto-provisioned repository.\n').toString('base64');
-      const resp = await fetch(`https://api.github.com/repos/${fullName}/contents/README.md`, {
-        method: 'PUT',
-        headers: { ...ghHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Initial commit', content, branch }),
-      });
-      if (resp.ok) {
-        await new Promise(r => setTimeout(r, 1500));
-        return true;
-      }
-      if (resp.status === 422) {
-        const resp2 = await fetch(`https://api.github.com/repos/${fullName}/contents/README.md`, {
-          method: 'PUT',
-          headers: { ...ghHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: 'Initial commit', content }),
-        });
-        if (resp2.ok) {
-          await new Promise(r => setTimeout(r, 1500));
-          return true;
-        }
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  private isRepoError(msg: string): boolean {
-    return /repository is required|default repository|source\.repository|Repository is empty|Git Repository is empty|Branch.*does not exist|branch.*ref|Failed to verify/i.test(msg);
-  }
-
-  private static _repoFailureMessage: string | null = null;
-
-  static resetRepoFailure(): void {
-    CursorProvider._repoFailureMessage = null;
-    CursorProvider._workingSource = null;
-    CursorProvider._cachedRepos = null;
-    CursorProvider._cachedReposAt = 0;
-  }
-
-  private async runCloudAgent(
-    messages: LLMMessage[],
-    tools?: LLMTool[],
-    _options?: Record<string, any>,
-  ): Promise<string> {
-    // Permanent cache until user reconnects OAuth or changes settings
-    if (CursorProvider._repoFailureMessage) {
-      return CursorProvider._repoFailureMessage;
-    }
-
-    const promptText = this.buildAgentPrompt(messages, tools);
-
-    let payload: Record<string, any> = {
-      prompt: { text: promptText },
-      target: { autoCreatePr: false },
-    };
-    if (this.model && this.model !== 'default') payload.model = this.model;
-
-    if (CursorProvider._workingSource) {
-      payload.source = { ...CursorProvider._workingSource };
-    }
-
-    // Step 1: Try with current payload (cached source or Cursor dashboard default)
-    try {
-      const resp = await this.requestCursor('POST', '/v0/agents', payload);
-      const result = await this.pollAgentResult(resp);
-      CursorProvider._repoFailureMessage = null;
-      return result;
-    } catch (err: any) {
-      const msg = String(err?.message || '');
-
-      if (!this.isRepoError(msg)) {
-        if (this.model && /model|invalid|unsupported/i.test(msg)) {
-          console.log(`[Cursor] Model issue, retrying without model param`);
-          delete payload.model;
-          try {
-            const resp = await this.requestCursor('POST', '/v0/agents', payload);
-            return await this.pollAgentResult(resp);
-          } catch { /* fall through */ }
-        }
-        return `[Cursor API Error] ${msg.slice(0, 300)}`;
-      }
-      console.log(`[Cursor] Step 1 repo error: ${msg.slice(0, 150)}`);
-    }
-
-    // Step 2: The repo is empty — try to initialize it via GitHub OAuth
-    CursorProvider._workingSource = null;
-    const initialized = await this.tryInitializeEmptyRepos();
-    if (initialized) {
-      console.log(`[Cursor] Step 2: initialized repo, retrying...`);
-      await new Promise(r => setTimeout(r, 3000));
-      try {
-        const resp = await this.requestCursor('POST', '/v0/agents', payload);
-        CursorProvider._repoFailureMessage = null;
-        return await this.pollAgentResult(resp);
-      } catch (err: any) {
-        console.log(`[Cursor] Retry after init failed: ${String(err?.message || '').slice(0, 150)}`);
-      }
-    }
-
-    // Step 3: Try repos from Cursor's /v0/repositories
-    const cursorRepos = await this.getCursorAccessibleRepos();
-    for (const repoUrl of cursorRepos) {
-      payload.source = { repository: repoUrl };
-      console.log(`[Cursor] Step 3: trying Cursor-accessible repo: ${repoUrl}`);
-      try {
-        const resp = await this.requestCursor('POST', '/v0/agents', payload);
-        CursorProvider._workingSource = { repository: repoUrl };
-        CursorProvider._repoFailureMessage = null;
-        return await this.pollAgentResult(resp);
-      } catch (err: any) {
-        const msg = String(err?.message || '');
-        if (!this.isRepoError(msg)) return `[Cursor API Error] ${msg.slice(0, 300)}`;
-      }
-    }
-
-    // Step 4: Try env-configured or auto-provisioned repo (with explicit source)
-    const envRepo = process.env.CURSOR_REPOSITORY_URL;
-    if (envRepo) {
-      payload.source = { repository: envRepo };
-      try {
-        const resp = await this.requestCursor('POST', '/v0/agents', payload);
-        CursorProvider._workingSource = { repository: envRepo };
-        CursorProvider._repoFailureMessage = null;
-        return await this.pollAgentResult(resp);
-      } catch { /* fall through */ }
-    }
-    const auto = await this.autoProvisionRepositoryFromGithubOAuth();
-    if (auto) {
-      payload.source = { ...auto };
-      console.log(`[Cursor] Step 4: trying auto-provisioned repo: ${auto.repository}`);
-      try {
-        const resp = await this.requestCursor('POST', '/v0/agents', payload);
-        CursorProvider._workingSource = auto;
-        CursorProvider._repoFailureMessage = null;
-        return await this.pollAgentResult(resp);
-      } catch (err: any) {
-        console.log(`[Cursor] Auto-provisioned repo failed: ${String(err?.message || '').slice(0, 150)}`);
-      }
-    }
-
-    const guidance =
-      'I cannot process this request right now. Your Cursor Cloud Agents setup needs a GitHub repository with at least one commit.\n\n' +
-      '**How to fix:**\n' +
-      '1. Go to [cursor.com/dashboard/cloud-agents](https://cursor.com/dashboard/cloud-agents)\n' +
-      '2. Under "Default Repository", select a repo that has at least one commit\n' +
-      '3. If your repo is empty, push any commit to it (even just a README)\n' +
-      '4. Come back here and try again\n\n' +
-      'Alternatively, reconnect GitHub in Settings → OAuth to allow auto-provisioning.';
-
-    CursorProvider._repoFailureMessage = guidance;
-    console.log('[Cursor] All methods exhausted — caching guidance until OAuth reconnect');
-    return guidance;
-  }
-
-  private async pollAgentResult(createResp: Response): Promise<string> {
-    const created = await createResp.json() as any;
-    const agentId = created?.id;
-    if (!agentId) throw new Error('Cursor API: failed to create cloud agent (missing id)');
-
-    const startedAt = Date.now();
-    const timeoutMs = 120000;
-    const terminal = new Set(['FINISHED', 'FAILED', 'STOPPED', 'CANCELLED', 'ERRORED']);
-    let status = '';
-
-    while (Date.now() - startedAt < timeoutMs) {
-      const stResp = await this.requestCursor('GET', `/v0/agents/${agentId}`);
-      const st = await stResp.json() as any;
-      status = String(st?.status || '');
-      if (terminal.has(status)) break;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
-
-    const convResp = await this.requestCursor('GET', `/v0/agents/${agentId}/conversation`);
-    const conv = await convResp.json() as any;
-    const messagesList = Array.isArray(conv?.messages) ? conv.messages : [];
-    const assistantText = messagesList
-      .filter((m: any) => m?.type === 'assistant_message')
-      .map((m: any) => String(m?.text || '').trim())
-      .filter(Boolean)
-      .pop() || '';
-
-    if (assistantText) return assistantText;
-    if (status && status !== 'FINISHED') {
-      throw new Error(`Cursor agent finished without answer (status: ${status})`);
-    }
-    throw new Error('Cursor API: no assistant response in conversation');
-  }
-
-  private async resolveCursorToken(): Promise<string> {
-    if (this.apiKey) return this.apiKey;
-    const envToken = process.env.CURSOR_API_KEY || '';
-    if (envToken) return envToken;
-    const manager = getOAuthManager();
-    if (manager) {
-      const oauthToken = await manager.getToken('cursor');
-      if (oauthToken) return oauthToken;
-    }
-    throw new Error('Cursor API key missing. Set CURSOR_API_KEY in Settings -> API Keys.');
-  }
-}
-
-// =====================================================
-// Generic OAuth-based OpenAI-compatible provider
-// For Google (Vertex/Gemini via OpenAI compat) and Azure AD OAuth
-// =====================================================
 
 export class OAuthOpenAIProvider implements LLMProvider {
   private model: string;
@@ -2050,21 +2687,39 @@ export class OAuthOpenAIProvider implements LLMProvider {
       body.tool_choice = 'auto';
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`OAuth LLM request failed (${response.status}): ${errBody}`);
+    let response: Response | null = null;
+    const MAX_RETRIES = 4;
+    const BACKOFF_MS = [5000, 15000, 30000, 60000];
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            response = await fetch(`${this.baseUrl}/chat/completions`, {
+                method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 429) {
+        if (attempt === MAX_RETRIES) {
+          const errBody = await response.text();
+          throw new Error(`OAuth LLM request failed (429): ${errBody}`);
+        }
+        const retryAfter = response.headers.get('retry-after');
+        let waitMs = BACKOFF_MS[attempt] || 60000;
+        if (retryAfter) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfter) * 1000 + 500));
+        console.warn(`[OAuth/${this.oauthProvider}] 429 — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      break;
     }
 
-    return parseOpenAIResponse(await response.json());
+    if (!response!.ok) {
+      const errBody = await response!.text();
+      throw new Error(`OAuth LLM request failed (${response!.status}): ${errBody}`);
+    }
+
+    return parseOpenAIResponse(await response!.json());
   }
 
   async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
@@ -2082,36 +2737,49 @@ export class OAuthOpenAIProvider implements LLMProvider {
       body.tool_choice = 'auto';
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    });
 
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`OAuth LLM stream failed (${response.status}): ${errBody}`);
+    let streamResp: Response | null = null;
+    const S_MAX_RETRIES = 4;
+    const S_BACKOFF = [5000, 15000, 30000, 60000];
+    for (let attempt = 0; attempt <= S_MAX_RETRIES; attempt++) {
+            streamResp = await fetch(`${this.baseUrl}/chat/completions`, {
+                method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (streamResp.status === 429) {
+        if (attempt === S_MAX_RETRIES) {
+          const errBody = await streamResp.text();
+          throw new Error(`OAuth LLM stream failed (429): ${errBody}`);
+        }
+        const retryAfter = streamResp.headers.get('retry-after');
+        let waitMs = S_BACKOFF[attempt] || 60000;
+        if (retryAfter) waitMs = Math.max(waitMs, Math.min(90000, parseFloat(retryAfter) * 1000 + 500));
+        console.warn(`[OAuth/${this.oauthProvider}] stream 429 — waiting ${(waitMs/1000).toFixed(1)}s (attempt ${attempt + 1}/${S_MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      break;
     }
 
-    yield* streamOpenAIResponse(response);
+    if (!streamResp!.ok) {
+      const errBody = await streamResp!.text();
+      throw new Error(`OAuth LLM stream failed (${streamResp!.status}): ${errBody}`);
+    }
+
+    yield* streamOpenAIResponse(streamResp!);
   }
 }
 
-// =====================================================
-// Extract tool calls from Claude content text
-// Claude sometimes embeds tool use in content when
-// the chat/completions API fails to structure them
-// =====================================================
 
 function extractToolCallsFromContent(content: string, tools: LLMTool[]): LLMToolCall[] {
   const validToolNames = new Set(tools.map(t => t.function.name));
   const extracted: LLMToolCall[] = [];
 
-  // Pattern 1: Anthropic XML-style <tool_use> blocks
-  // <tool_use><name>tool_name</name><arguments>{"key":"value"}</arguments></tool_use>
+
   const xmlPattern = /<tool_use>\s*<name>([^<]+)<\/name>\s*(?:<arguments>|<input>)([\s\S]*?)(?:<\/arguments>|<\/input>)\s*<\/tool_use>/gi;
   let match;
   while ((match = xmlPattern.exec(content)) !== null) {
@@ -2119,19 +2787,17 @@ function extractToolCallsFromContent(content: string, tools: LLMTool[]): LLMTool
     const args = match[2].trim();
     if (validToolNames.has(name)) {
       try {
-        JSON.parse(args); // validate JSON
+        JSON.parse(args);
         extracted.push({
           id: `extracted_${Date.now()}_${extracted.length}`,
           function: { name, arguments: args },
         });
-      } catch { /* invalid JSON, skip */ }
+      } catch {  }
     }
   }
   if (extracted.length > 0) return extracted;
 
-  // Pattern 2: JSON-style tool call in content
-  // Look for patterns like: {"name": "tool_name", "arguments": {...}}
-  // or: tool_name({"key": "value"})
+
   for (const tool of tools) {
     const funcCallPattern = new RegExp(
       tool.function.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
@@ -2146,16 +2812,47 @@ function extractToolCallsFromContent(content: string, tools: LLMTool[]): LLMTool
           id: `extracted_${Date.now()}_${extracted.length}`,
           function: { name: tool.function.name, arguments: args },
         });
-      } catch { /* invalid JSON, skip */ }
+      } catch {  }
+    }
+  }
+  if (extracted.length > 0) return extracted;
+
+
+  const jsonObjPattern = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+  while ((match = jsonObjPattern.exec(content)) !== null) {
+    const name = match[1].trim();
+    const args = match[2].trim();
+    if (validToolNames.has(name)) {
+      try {
+        JSON.parse(args);
+        extracted.push({
+          id: `extracted_${Date.now()}_${extracted.length}`,
+          function: { name, arguments: args },
+        });
+      } catch {  }
     }
   }
 
   return extracted;
 }
 
-// =====================================================
-// Shared OpenAI-format helpers
-// =====================================================
+
+const _toolIdCache = new Map<string, string>();
+function sanitizeToolId(id: string): string {
+  if (!id) return 'tc_' + Math.random().toString(36).slice(2, 10);
+
+  const cached = _toolIdCache.get(id);
+  if (cached) return cached;
+  let clean = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (clean.length > 40) {
+
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+    clean = clean.slice(0, 32) + '_' + Math.abs(h).toString(36).slice(0, 7);
+  }
+  _toolIdCache.set(id, clean);
+  return clean;
+}
 
 function formatOpenAIMessage(msg: LLMMessage): Record<string, any> {
   if (!msg || !msg.role) return { role: 'user', content: '' };
@@ -2169,10 +2866,10 @@ function formatOpenAIMessage(msg: LLMMessage): Record<string, any> {
   } else {
     formatted.content = msg.content;
   }
-  if (msg.toolCallId) formatted.tool_call_id = msg.toolCallId;
+  if (msg.toolCallId) formatted.tool_call_id = sanitizeToolId(msg.toolCallId);
   if (msg.toolCalls) {
     formatted.tool_calls = msg.toolCalls.map(tc => ({
-      id: tc.id, type: 'function', function: tc.function,
+      id: sanitizeToolId(tc.id), type: 'function', function: tc.function,
     }));
   }
   return formatted;
@@ -2241,7 +2938,7 @@ async function* streamOpenAIResponse(response: Response): AsyncGenerator<LLMStre
               if (tc.function?.arguments) acc.args += tc.function.arguments;
             }
           }
-        } catch { /* skip malformed SSE */ }
+        } catch {  }
       }
     }
   } finally {
@@ -2257,22 +2954,14 @@ async function* streamOpenAIResponse(response: Response): AsyncGenerator<LLMStre
   }
 }
 
-// =====================================================
-// Provider factory
-// =====================================================
 
 export function createLLMProvider(config: ModelConfig): LLMProvider {
-  // Cursor API (independent from Copilot OAuth)
-  if (config.provider === 'cursor') {
-    return new CursorProvider(config);
-  }
 
-  // GitHub Copilot (OAuth)
   if (config.provider === 'copilot') {
     return new CopilotProvider(config);
   }
 
-  // OAuth-based providers (google-oauth, azure-oauth)
+
   if (config.provider === 'google-oauth') {
     return new OAuthOpenAIProvider({
       ...config,
@@ -2287,7 +2976,7 @@ export function createLLMProvider(config: ModelConfig): LLMProvider {
     });
   }
 
-  // OpenAI-compatible providers
+
   if (OPENAI_COMPATIBLE_PROVIDERS.has(config.provider)) {
     return new OpenAIProvider(config);
   }
@@ -2306,7 +2995,7 @@ export function createLLMProvider(config: ModelConfig): LLMProvider {
     case 'amazon-bedrock':
       return new BedrockProvider(config);
     default:
-      // Fallback: try as OpenAI-compatible with custom baseUrl
+
       if (config.baseUrl) {
         return new OpenAIProvider(config);
       }

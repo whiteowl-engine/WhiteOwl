@@ -1,4 +1,4 @@
-import { LoggerInterface } from '../types';
+import { LoggerInterface } from '../types.ts';
 
 interface ScheduledTask {
   id: string;
@@ -48,7 +48,7 @@ export class Scheduler {
       }
     }, task.intervalMs);
 
-    // Run immediately on start
+
     Promise.resolve(task.fn()).catch(err => {
       this.logger.error(`Scheduled task "${task.name}" initial run failed`, err);
     });

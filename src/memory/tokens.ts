@@ -1,5 +1,5 @@
-import { Database } from './sql-compat';
-import { TokenInfo, TokenSnapshot, TokenAnalysis, HolderData } from '../types';
+import { Database } from './sql-compat.ts';
+import { TokenInfo, TokenSnapshot, TokenAnalysis, HolderData } from '../types.ts';
 
 export class TokenStore {
   private db: Database;

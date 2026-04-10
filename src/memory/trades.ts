@@ -1,5 +1,5 @@
-import { Database } from './sql-compat';
-import { TradeResult, TradeIntent, SessionStats } from '../types';
+import { Database } from './sql-compat.ts';
+import { TradeResult, TradeIntent, SessionStats } from '../types.ts';
 
 export class TradeLog {
   private db: Database;
@@ -73,27 +73,44 @@ export class TradeLog {
     const sinceTs = since || 0;
 
     const trades = this.db.prepare(`
-      SELECT action, success, amount_sol, price FROM trades
+      SELECT action, success, amount_sol, price, mint FROM trades
       WHERE created_at >= ? AND success = 1
     `).all(sinceTs) as any[];
 
-    // Group buys and sells per mint to calculate P&L
-    const buys = trades.filter(t => t.action === 'buy');
-    const sells = trades.filter(t => t.action === 'sell');
+    const byMint = new Map<string, { bought: number; sold: number }>();
+    for (const t of trades) {
+      const entry = byMint.get(t.mint) || { bought: 0, sold: 0 };
+      if (t.action === 'buy') entry.bought += (t.amount_sol || 0);
+      else if (t.action === 'sell') entry.sold += (t.amount_sol || 0);
+      byMint.set(t.mint, entry);
+    }
 
-    const totalBuySol = buys.reduce((s, t) => s + (t.amount_sol || 0), 0);
-    const totalSellSol = sells.reduce((s, t) => s + (t.amount_sol || 0), 0);
-    const pnl = totalSellSol - totalBuySol;
+    let tradesWon = 0;
+    let tradesLost = 0;
+    let totalPnl = 0;
+    for (const [, entry] of byMint) {
+      const pnl = entry.sold - entry.bought;
+      totalPnl += pnl;
+      if (entry.sold > 0 && entry.bought > 0) {
+
+        if (pnl > 0) tradesWon++;
+        else tradesLost++;
+      }
+    }
+
+    const completedTrades = tradesWon + tradesLost;
+    const winRate = completedTrades > 0 ? tradesWon / completedTrades : 0;
 
     return {
       tokensScanned: 0,
       signalsGenerated: 0,
       tradesExecuted: trades.length,
-      tradesWon: sells.filter(t => (t.amount_sol || 0) > 0).length,
-      tradesLost: 0,
-      totalPnlSol: pnl,
-      peakPnlSol: Math.max(pnl, 0),
-      worstDrawdownSol: Math.min(pnl, 0),
+      tradesWon,
+      tradesLost,
+      totalPnlSol: totalPnl,
+      peakPnlSol: Math.max(totalPnl, 0),
+      worstDrawdownSol: Math.min(totalPnl, 0),
+      winRate,
     };
   }
 

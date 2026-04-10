@@ -1,18 +1,19 @@
 ﻿import WebSocket from 'ws';
-import { Skill, SkillManifest, SkillContext, TokenInfo, EventBusInterface, LoggerInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, TokenInfo, EventBusInterface, LoggerInterface } from '../types.ts';
+import { TrendContext } from '../core/trend-context.ts';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { getSolPriceUsd } from '../core/sol-price.ts';
 import {
   OnlinePumpSdk,
   bondingCurvePda,
   bondingCurveMarketCap,
   type BondingCurve,
-} from '@pump-fun/pump-sdk';
+} from '../lib/pump-sdk.ts';
 
 const PUMP_API_URL = 'https://frontend-api-v3.pump.fun';
 const SWAP_API_URL = 'https://swap-api.pump.fun';
 const ADVANCED_API_URL = 'https://advanced-api-v2.pump.fun';
 
-// в”Ђв”Ђ NATS server configs (pump.fun native real-time feeds) в”Ђв”Ђ
 const NATS_CORE = {
   url: 'wss://prod-v2.nats.realtime.pump.fun',
   user: 'subscriber',
@@ -85,26 +86,24 @@ interface PumpComment {
   mint: string;
 }
 
-// ── Trenches filter system ──
-
 interface TrenchesConfig {
   mode: 'alert' | 'auto_buy';
-  // Meta/narrative keywords to match (empty = match all)
+
   metaKeywords: string[];
-  // Minimum score to pass filter (0-100)
+
   minScore: number;
-  // Require at least one social link
+
   requireSocials: boolean;
-  // Auto-buy parameters (only used in auto_buy mode)
+
   buyAmountSol: number;
   slippageBps: number;
   priorityFeeSol: number;
-  // Market activity thresholds
+
   minBuyers5m: number;
-  minVolume5m: number; // in USD
-  // Evaluation interval in ms
+  minVolume5m: number;
+
   evalIntervalMs: number;
-  // Max age for queued tokens (skip if older)
+
   maxTokenAgeMs: number;
 }
 
@@ -126,7 +125,7 @@ export class PumpMonitorSkill implements Skill {
     version: '3.0.0',
     description: 'Full pump.fun integration with official SDK: monitor launches, on-chain bonding curve reads, search tokens, trending, trade history, comments, dev reputation, graduated tokens, real-time WebSocket',
     tools: [
-      // в”Ђв”Ђ Existing tools в”Ђв”Ђ
+
       {
         name: 'start_monitoring',
         description: 'Start monitoring pump.fun for new token launches via WebSocket',
@@ -181,7 +180,7 @@ export class PumpMonitorSkill implements Skill {
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Search by creator wallet в”Ђв”Ђ
+
       {
         name: 'search_tokens_by_creator',
         description: 'Find ALL tokens created by a specific wallet address on pump.fun. Useful to check a dev\'s history.',
@@ -196,7 +195,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Search by name/symbol в”Ђв”Ђ
+
       {
         name: 'search_tokens_by_name',
         description: 'Search pump.fun tokens by name or ticker symbol. Returns matching tokens sorted by market cap.',
@@ -211,7 +210,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Trending / King of the Hill в”Ђв”Ђ
+
       {
         name: 'get_trending_tokens',
         description: 'Get trending tokens from pump.fun (King of the Hill). These are tokens gaining the most momentum right now.',
@@ -224,7 +223,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Trade history for a token в”Ђв”Ђ
+
       {
         name: 'get_token_trades',
         description: 'Get recent trade history for a specific token on pump.fun. Shows who bought/sold, amounts, and timestamps.',
@@ -239,7 +238,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Token comments в”Ђв”Ђ
+
       {
         name: 'get_token_comments',
         description: 'Get comments/replies on a pump.fun token page. Shows community sentiment and discussion.',
@@ -254,7 +253,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Dev profile / reputation в”Ђв”Ђ
+
       {
         name: 'get_dev_profile',
         description: 'Analyze a token creator\'s reputation: how many tokens they launched, graduation rate, average mcap, rug patterns. Essential for risk assessment.',
@@ -267,7 +266,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Subscribe to token trades via WebSocket в”Ђв”Ђ
+
       {
         name: 'subscribe_token_trades',
         description: 'Subscribe to real-time trade events for a specific token via WebSocket. Trades will be emitted as token:trade events.',
@@ -280,7 +279,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Search by market cap range в”Ђв”Ђ
+
       {
         name: 'search_tokens_by_mcap',
         description: 'Find pump.fun tokens within a specific market cap range (in USD). Useful for finding tokens at a target size.',
@@ -296,7 +295,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ NEW: Graduated tokens (migrated to pump.fun AMM pools) в”Ђв”Ђ
+
       {
         name: 'get_graduated_tokens',
         description: 'Get tokens that recently graduated from bonding curve and migrated to pump.fun AMM pools. These tokens have completed their bonding curve.',
@@ -309,7 +308,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ Top holders with SOL balances в”Ђв”Ђ
+
       {
         name: 'get_top_holders',
         description: 'Get top token holders with their SOL balances. Essential for detecting whale concentration, dev holding, and sniper wallets.',
@@ -322,7 +321,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ Market activity (5m, 1h stats) в”Ђв”Ђ
+
       {
         name: 'get_market_activity',
         description: 'Get real-time market activity for a token: number of txs, volume, buyers/sellers, price change % for 5m and 1h windows.',
@@ -335,7 +334,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ ATH (All-Time High) market cap в”Ђв”Ђ
+
       {
         name: 'get_token_ath',
         description: 'Get the all-time high market cap for a token. Shows the peak value the token reached.',
@@ -348,14 +347,14 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ SOL price in USD в”Ђв”Ђ
+
       {
         name: 'get_sol_price',
         description: 'Get the current SOL price in USD from pump.fun.',
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // в”Ђв”Ђ Price candles / chart data в”Ђв”Ђ
+
       {
         name: 'get_token_candles',
         description: 'Get OHLCV price candle data for a token chart. Useful for technical analysis and price history.',
@@ -370,14 +369,14 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── King of the Hill ──
+
       {
         name: 'get_king_of_the_hill',
         description: 'Get the current King of the Hill token on pump.fun — the coin with highest market cap approaching graduation.',
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // ── Currently live tokens ──
+
       {
         name: 'get_currently_live',
         description: 'Get tokens with active livestreams on pump.fun.',
@@ -390,7 +389,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── Featured tokens by time window ──
+
       {
         name: 'get_featured_tokens',
         description: 'Get featured/trending tokens from pump.fun for a given time window.',
@@ -404,7 +403,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── Wallet token balances on pump.fun ──
+
       {
         name: 'get_wallet_balances',
         description: 'Get pump.fun token balances for a wallet address. Shows all pump.fun tokens held by this wallet.',
@@ -420,14 +419,14 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── Current metas / narratives ──
+
       {
         name: 'get_current_metas',
         description: 'Get the currently trending metas/narratives on pump.fun. Shows what themes and categories are hot right now.',
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // ── Search tokens by meta/narrative ──
+
       {
         name: 'search_by_meta',
         description: 'Search for pump.fun tokens belonging to a specific meta/narrative (e.g. "AI", "dog", "cat").',
@@ -440,14 +439,14 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── KOL scan coins ──
+
       {
         name: 'get_kol_coins',
         description: 'Get coins tracked by KOLs (Key Opinion Leaders) on pump.fun. High-signal data for smart money following.',
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // ── Batch get coins by mints ──
+
       {
         name: 'batch_get_coins',
         description: 'Fetch multiple tokens at once by their mint addresses. Efficient for analyzing a watchlist or portfolio.',
@@ -460,7 +459,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── Batch market activity ──
+
       {
         name: 'batch_get_market_activity',
         description: 'Fetch market activity (txs, volume, buyers, sellers, price change) for multiple tokens at once. Supports multiple time intervals.',
@@ -474,7 +473,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // ── Trenches: real-time new token filter ──
+
       {
         name: 'start_trenches',
         description: 'Start Trenches — real-time filter for newly created tokens. Monitors all new launches, evaluates them against current meta/narratives and market activity, then either alerts you or auto-buys matching tokens.',
@@ -529,7 +528,7 @@ export class PumpMonitorSkill implements Skill {
         },
         riskLevel: 'write',
       },
-      // ── Auto-analysis: AI batch-analyzes every N new tokens ──
+
       {
         name: 'start_auto_analysis',
         description: 'Start automatic AI batch analysis. Every N new tokens (default: 50), the system collects their market data and sends them to the AI for a deep-dive analysis to find potential moonshot tokens. Results are emitted as trenches:ai_pick events.',
@@ -564,11 +563,24 @@ export class PumpMonitorSkill implements Skill {
   private pumpSdk!: OnlinePumpSdk;
   private filters: { requireSocials?: boolean; nameBlacklist?: RegExp[] } = {};
   private stats = { tokensReceived: 0, tokensEmitted: 0, tokensFiltered: 0, tradeEventsReceived: 0 };
+
+  private pumpApiStats = {
+    totalRequests: 0,
+    successCount: 0,
+    failCount: 0,
+    avgLatencyMs: 0,
+    _latencySum: 0,
+    _latencyCount: 0,
+    lastError: '' as string,
+    lastErrorTs: 0,
+    natsConnected: false,
+    natsReconnects: 0,
+  };
+  getPumpApiStats() { return { ...this.pumpApiStats, _latencySum: undefined, _latencyCount: undefined }; }
   private maxReconnects = 10;
   private subscribedTokens = new Set<string>();
   private monitoring = false;
 
-  // ── Trenches state ──
   private trenchesActive = false;
   private trenchesConfig: TrenchesConfig = {
     mode: 'alert',
@@ -590,7 +602,13 @@ export class PumpMonitorSkill implements Skill {
   private trenchesRecentAlerts: Array<{ mint: string; name: string; symbol: string; score: number; reason: string; timestamp: number }> = [];
   private cachedMetas: { data: any; fetchedAt: number } | null = null;
 
-  // ── Auto-analysis batch accumulator ──
+  private trendContext: TrendContext | null = null;
+
+  setTrendContext(tc: TrendContext): void {
+    this.trendContext = tc;
+    this.logger?.info('[PumpMonitor] TrendContext attached for narrative scoring');
+  }
+
   private autoAnalysisEnabled = false;
   private autoAnalysisBatchSize = 50;
   private autoAnalysisBuffer: Array<{ mint: string; name: string; symbol: string; dev: string; description?: string; twitter?: string; telegram?: string; website?: string; mcap: number; addedAt: number }> = [];
@@ -607,7 +625,6 @@ export class PumpMonitorSkill implements Skill {
     this.eventBus = ctx.eventBus;
     this.logger = ctx.logger;
 
-    // Initialize pump SDK for on-chain bonding curve reads
     const rpcUrl = ctx.config.rpc?.solana || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
     const connection = new Connection(rpcUrl, 'confirmed');
     this.pumpSdk = new OnlinePumpSdk(connection);
@@ -669,6 +686,8 @@ export class PumpMonitorSkill implements Skill {
         return this.getKolCoins();
       case 'batch_get_coins':
         return this.batchGetCoins(params.mints);
+      case 'batch_enrich_onchain':
+        return this.batchEnrichOnChain(params.mints);
       case 'batch_get_market_activity':
         return this.batchGetMarketActivity(params.mints, params.intervals);
       case 'start_trenches':
@@ -696,9 +715,6 @@ export class PumpMonitorSkill implements Skill {
     this.stopMonitoring();
   }
 
-  // =====================================================
-  // WebSocket monitoring
-  // =====================================================
 
   private startMonitoring(filters?: any): { status: string } {
     if (this.monitoring) {
@@ -714,15 +730,15 @@ export class PumpMonitorSkill implements Skill {
 
     this.monitoring = true;
 
-    // Connect to Core for new token events
+
     this.connectNats(this.coreConn, () => {
       this.natsSub(this.coreConn, SUBJECT_COIN_LIFECYCLE);
     });
 
-    // Connect to Unified for trade events (all trades)
+
     this.connectNats(this.unifiedConn, () => {
       this.natsSub(this.unifiedConn, `${SUBJECT_TRADE}.*`);
-      // Re-subscribe to any per-token trade feeds  
+
       for (const mint of this.subscribedTokens) {
         this.natsSub(this.unifiedConn, `${SUBJECT_TRADE}.${mint}`);
       }
@@ -731,7 +747,6 @@ export class PumpMonitorSkill implements Skill {
     return { status: 'started' };
   }
 
-  // в”Ђв”Ђ NATS connection / protocol в”Ђв”Ђ
 
   private connectNats(conn: NatsConn, onReady: () => void): void {
     conn.ws = new WebSocket(conn.config.url, { headers: { Origin: 'https://pump.fun' } });
@@ -739,7 +754,7 @@ export class PumpMonitorSkill implements Skill {
 
     conn.ws.on('open', () => {
       conn.reconnectAttempts = 0;
-      // NATS CONNECT with credentials
+
       const connectPayload = JSON.stringify({
         verbose: false,
         pedantic: false,
@@ -750,6 +765,7 @@ export class PumpMonitorSkill implements Skill {
       });
       conn.ws!.send(`CONNECT ${connectPayload}\r\n`);
       conn.ws!.send('PING\r\n');
+      this.pumpApiStats.natsConnected = true;
       this.logger.info(`NATS [${conn.name}] connected`);
       onReady();
     });
@@ -760,6 +776,7 @@ export class PumpMonitorSkill implements Skill {
     });
 
     conn.ws.on('close', () => {
+      this.pumpApiStats.natsConnected = false;
       this.logger.warn(`NATS [${conn.name}] disconnected`);
       this.scheduleNatsReconnect(conn, onReady);
     });
@@ -786,13 +803,13 @@ export class PumpMonitorSkill implements Skill {
       const line = conn.buffer.substring(0, idx);
 
       if (line.startsWith('MSG ')) {
-        // MSG <subject> <sid> [reply] <#bytes>\r\n<payload>\r\n
+
         const parts = line.split(' ');
         const numBytes = parseInt(parts[parts.length - 1], 10);
-        const payloadStart = idx + 2; // after \r\n
+        const payloadStart = idx + 2;
         const payloadEnd = payloadStart + numBytes;
 
-        // Wait for full payload + trailing \r\n
+
         if (conn.buffer.length < payloadEnd + 2) break;
 
         const subject = parts[1];
@@ -803,7 +820,7 @@ export class PumpMonitorSkill implements Skill {
         continue;
       }
 
-      // Consume the line
+
       conn.buffer = conn.buffer.substring(idx + 2);
 
       if (line === 'PING') {
@@ -811,7 +828,6 @@ export class PumpMonitorSkill implements Skill {
       } else if (line.startsWith('-ERR')) {
         this.logger.error(`NATS [${conn.name}] server error: ${line}`);
       }
-      // INFO, PONG, +OK вЂ” ignored
     }
   }
 
@@ -821,7 +837,7 @@ export class PumpMonitorSkill implements Skill {
         const msg = JSON.parse(payload);
         this.handleCoinLifecycle(msg);
       } else if (subject.startsWith(SUBJECT_TRADE)) {
-        // Trade payloads are double-JSON-encoded
+
         let trade: any;
         try {
           const inner = JSON.parse(payload);
@@ -836,10 +852,9 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // в”Ђв”Ђ Event handlers в”Ђв”Ђ
 
   private handleCoinLifecycle(msg: any): void {
-    // event_type 1 = new coin created
+
     if (msg.event_type === 1 && msg.after) {
       const d = msg.after;
       this.stats.tokensReceived++;
@@ -862,7 +877,7 @@ export class PumpMonitorSkill implements Skill {
 
       this.stats.tokensEmitted++;
 
-      // For Token-2022 tokens, NATS may put token_program in creator field — use user field as fallback
+
       const KNOWN_PROGRAMS = [
         'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
@@ -901,7 +916,7 @@ export class PumpMonitorSkill implements Skill {
       });
     }
 
-    // event_type 4 = graduated (bonding curve complete)
+
     if (msg.event_type === 4 && (msg.before || msg.after)) {
       const d = msg.before || msg.after;
       this.eventBus.emit('token:graduated', {
@@ -981,16 +996,17 @@ export class PumpMonitorSkill implements Skill {
     conn.reconnectAttempts++;
 
     conn.reconnectTimer = setTimeout(() => {
+      this.pumpApiStats.natsReconnects++;
       this.logger.info(`NATS [${conn.name}] reconnecting (attempt ${conn.reconnectAttempts})...`);
       this.connectNats(conn, onReady);
     }, delay);
   }
 
-  // =====================================================
-  // Shared fetch with pump.fun required headers
-  // =====================================================
 
   private async pumpFetch(url: string, opts?: RequestInit): Promise<Response> {
+    const endpoint = url.split('?')[0].replace(/https:\/\/[^/]+\//, '');
+    this.pumpApiStats.totalRequests++;
+    const t0 = Date.now();
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'Origin': 'https://pump.fun',
@@ -998,16 +1014,35 @@ export class PumpMonitorSkill implements Skill {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       ...(opts?.headers as Record<string, string> || {}),
     };
-    return fetch(url, { ...opts, headers });
+    try {
+      const res = await fetch(url, { ...opts, headers });
+      const ms = Date.now() - t0;
+      this.pumpApiStats._latencySum += ms; this.pumpApiStats._latencyCount++;
+      this.pumpApiStats.avgLatencyMs = Math.round(this.pumpApiStats._latencySum / this.pumpApiStats._latencyCount);
+      if (res.ok) {
+        this.pumpApiStats.successCount++;
+        this.logger?.debug(`[Pump] ✓ ${endpoint} ${res.status} ${ms}ms`);
+      } else {
+        this.pumpApiStats.failCount++;
+        this.pumpApiStats.lastError = `${res.status} ${endpoint}`;
+        this.pumpApiStats.lastErrorTs = Date.now();
+        this.logger?.warn(`[Pump] ✗ ${endpoint} ${res.status} ${ms}ms`);
+      }
+      return res;
+    } catch (err: any) {
+      const ms = Date.now() - t0;
+      this.pumpApiStats.failCount++;
+      this.pumpApiStats.lastError = `${err.message} ${endpoint}`;
+      this.pumpApiStats.lastErrorTs = Date.now();
+      this.logger?.warn(`[Pump] ✗ ${endpoint} ERR ${ms}ms: ${err.message}`);
+      throw err;
+    }
   }
 
-  // =====================================================
-  // Token info & new tokens (existing)
-  // =====================================================
 
   private async getTokenInfo(mint: string): Promise<any> {
     try {
-      // Fetch from frontend API v2 for metadata
+
       const res = await this.pumpFetch(`${PUMP_API_URL}/coins-v2/${mint}`);
       if (!res.ok) {
         return { error: `Failed to fetch token info: ${res.status}` };
@@ -1016,7 +1051,7 @@ export class PumpMonitorSkill implements Skill {
       const data = await res.json() as PumpToken;
       const token = this.pumpTokenToInfo(data);
 
-      // Enrich with on-chain bonding curve data via official SDK
+
       let onChainData: any = {};
       try {
         const mintPk = new PublicKey(mint);
@@ -1053,16 +1088,15 @@ export class PumpMonitorSkill implements Skill {
           },
         };
 
-        // Update token info with accurate on-chain data
+
         token.bondingCurveProgress = bc.complete ? 100 : Math.min((realSolReserves / 85) * 100, 100);
         token.price = virtualTokenReserves > 0 ? virtualSolReserves / virtualTokenReserves : 0;
       } catch {
-        // SDK fetch failed вЂ” still return frontend API data
       }
 
       this.ctx.memory.storeToken(token);
 
-      // Enrich with swap-api and advanced-api data in parallel (non-blocking)
+
       let enrichment: any = {};
       try {
         const program = data.program || 'pump';
@@ -1091,7 +1125,7 @@ export class PumpMonitorSkill implements Skill {
           }));
           enrichment.totalHolders = (holdersData.totalHolders || []).length;
         }
-      } catch { /* non-critical enrichment */ }
+      } catch {  }
 
       return { ...token, ...onChainData, ...enrichment };
     } catch (err: any) {
@@ -1113,9 +1147,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Search tokens by creator wallet
-  // =====================================================
 
   private async searchByCreator(wallet: string, limit: number = 20, offset: number = 0): Promise<any> {
     try {
@@ -1140,9 +1171,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Search tokens by name/symbol
-  // =====================================================
 
   private async searchByName(query: string, limit: number = 20, offset: number = 0): Promise<any> {
     try {
@@ -1173,30 +1201,46 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Trending / King of the Hill
-  // =====================================================
 
   private async getTrending(limit: number = 20, offset: number = 0): Promise<any> {
     try {
-      // Primary: top-runners (actual pump.fun trending endpoint)
+      const safeOffset = offset || 0;
+      const safeLimit = limit || 20;
+
       const res = await this.pumpFetch(
         `${PUMP_API_URL}/coins/top-runners`
       );
       if (res.ok) {
         const data = await res.json() as any[];
-        // top-runners returns [{coin: PumpToken, ...}] вЂ” extract coin objects
-        const tokens = data.slice(offset, offset + limit).map((item: any) => {
+        const items = data.slice(safeOffset, safeOffset + safeLimit);
+
+
+        if (items.length > 0 && items[0].mint && !items[0].virtual_sol_reserves && !items[0].name) {
+          const mints = items.map((item: any) => item.mint);
+          try {
+                        const batchRes = await this.pumpFetch(`${ADVANCED_API_URL}/coins/mints`, {
+                            method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mints }),
+            });
+            if (batchRes.ok) {
+              const fullCoins = await batchRes.json() as PumpToken[];
+              return {
+                source: 'top_runners',
+                tokens: fullCoins.map(d => this.pumpTokenToInfo(d)),
+              };
+            }
+          } catch {  }
+        }
+
+        const tokens = items.map((item: any) => {
           const d = item.coin || item;
           return this.pumpTokenToInfo(d);
         });
-        return {
-          source: 'top_runners',
-          tokens,
-        };
+        return { source: 'top_runners', tokens };
       }
 
-      // Fallback: sort by last_trade_timestamp for "hot" tokens
+
       const fallbackRes = await this.pumpFetch(
         `${PUMP_API_URL}/coins?offset=${offset}&limit=${Math.min(limit, 50)}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
       );
@@ -1212,13 +1256,10 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Token trade history
-  // =====================================================
 
   private async getTokenTrades(mint: string, limit: number = 30, offset: number = 0): Promise<any> {
     try {
-      // Use swap-api v2 for trades (actual endpoint from pump.fun)
+
       const res = await this.pumpFetch(
         `${SWAP_API_URL}/v2/coins/${mint}/trades?limit=${Math.min(limit, 100)}&cursor=${offset}&minSolAmount=0&program=pump`
       );
@@ -1262,9 +1303,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Token comments
-  // =====================================================
 
   private async getTokenComments(mint: string, limit: number = 30, offset: number = 0): Promise<any> {
     try {
@@ -1293,13 +1331,10 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Dev profile / reputation analysis
-  // =====================================================
 
   private async getDevProfile(wallet: string): Promise<any> {
     try {
-      // Fetch all tokens created by this wallet
+
       const res = await this.pumpFetch(
         `${PUMP_API_URL}/coins-v2/user-created-coins/${wallet}?offset=0&limit=50&includeNsfw=true`
       );
@@ -1319,7 +1354,7 @@ export class PumpMonitorSkill implements Skill {
         };
       }
 
-      // Analyze patterns
+
       let graduated = 0;
       let totalMcapUsd = 0;
       let hasPool = 0;
@@ -1343,19 +1378,19 @@ export class PumpMonitorSkill implements Skill {
       const medianMcap = mcaps[Math.floor(mcaps.length / 2)] || 0;
       const graduationRate = allTokens.length > 0 ? graduated / allTokens.length : 0;
 
-      // Time analysis: tokens in last 24h, 7d
+
       const now = Date.now();
       const last24h = allTokens.filter(t => (now - t.created_timestamp) < 86400_000).length;
       const last7d = allTokens.filter(t => (now - t.created_timestamp) < 604800_000).length;
 
-      // Reputation scoring
+
       let reputationScore = 50;
-      if (allTokens.length > 20) reputationScore -= 15; // Spam
+      if (allTokens.length > 20) reputationScore -= 15;
       if (allTokens.length > 50) reputationScore -= 20;
       if (graduationRate > 0.1) reputationScore += 20;
       if (graduationRate > 0.3) reputationScore += 15;
       if (avgMcap > 50_000) reputationScore += 10;
-      if (last24h > 5) reputationScore -= 20; // Serial launcher
+      if (last24h > 5) reputationScore -= 20;
       if (last24h > 10) reputationScore -= 15;
       reputationScore = Math.max(0, Math.min(100, reputationScore));
 
@@ -1367,8 +1402,8 @@ export class PumpMonitorSkill implements Skill {
 
       const warnings: string[] = [];
       if (allTokens.length > 20) warnings.push(`Serial launcher: ${allTokens.length} tokens created`);
-      if (last24h > 5) warnings.push(`${last24h} tokens in last 24h вЂ” spam pattern`);
-      if (graduationRate < 0.05 && allTokens.length > 5) warnings.push('Very low graduation rate вЂ” possible rug pattern');
+      if (last24h > 5) warnings.push(`${last24h} tokens in last 24h - spam pattern`);
+      if (graduationRate < 0.05 && allTokens.length > 5) warnings.push('Very low graduation rate - possible rug pattern');
 
       return {
         wallet,
@@ -1397,14 +1432,11 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Subscribe to real-time token trades
-  // =====================================================
 
   private subscribeTokenTrades(mint: string): { status: string; mint: string } {
     this.subscribedTokens.add(mint);
 
-    // If unified NATS isn't connected yet, start it
+
     if (!this.unifiedConn.ws || this.unifiedConn.ws.readyState !== WebSocket.OPEN) {
       this.connectNats(this.unifiedConn, () => {
         this.natsSub(this.unifiedConn, `${SUBJECT_TRADE}.${mint}`);
@@ -1417,9 +1449,6 @@ export class PumpMonitorSkill implements Skill {
     return { status: 'subscribed', mint };
   }
 
-  // =====================================================
-  // NEW: Search by market cap range
-  // =====================================================
 
   private async searchByMcap(
     minMcap: number = 0,
@@ -1433,7 +1462,7 @@ export class PumpMonitorSkill implements Skill {
       const safeSort = allowedSorts.includes(sort) ? sort : 'market_cap';
       const safeOrder = order === 'ASC' ? 'ASC' : 'DESC';
 
-      // Fetch a larger batch and filter by mcap client-side (pump.fun API doesn't support min/max params)
+
       const fetchLimit = Math.min(Math.max(limit * 3, 50), 200);
       const res = await this.pumpFetch(
         `${PUMP_API_URL}/coins?offset=0&limit=${fetchLimit}&sort=${safeSort}&order=${safeOrder}&includeNsfw=false`
@@ -1464,16 +1493,13 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // NEW: Graduated tokens (migrated to pump.fun AMM)
-  // =====================================================
 
   private async getGraduatedTokens(limit: number = 20, offset: number = 0): Promise<any> {
     try {
-      // Use dedicated graduated endpoint from advanced-api-v2
+
       const res = await this.pumpFetch(`${ADVANCED_API_URL}/coins/graduated`);
       if (!res.ok) {
-        // Fallback to frontend-api-v3 filter
+
         const fallback = await this.pumpFetch(
           `${PUMP_API_URL}/coins?offset=${offset}&limit=${Math.min(limit, 50)}&sort=last_trade_timestamp&order=DESC&complete=true&includeNsfw=false`
         );
@@ -1509,9 +1535,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Top holders with SOL balances (advanced-api-v2)
-  // =====================================================
 
   private async getTopHolders(mint: string): Promise<any> {
     try {
@@ -1535,9 +1558,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Market activity вЂ” 5m/1h stats (swap-api v1)
-  // =====================================================
 
   private async getMarketActivity(mint: string): Promise<any> {
     try {
@@ -1551,9 +1571,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // ATH (All-Time High) market cap (swap-api v1)
-  // =====================================================
 
   private async getTokenAth(mint: string): Promise<any> {
     try {
@@ -1567,9 +1584,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // SOL price in USD (frontend-api-v3)
-  // =====================================================
 
   private async getSolPrice(): Promise<any> {
     try {
@@ -1583,9 +1597,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Price candles / chart data (swap-api v2)
-  // =====================================================
 
   private async getTokenCandles(mint: string, interval: string = '5m', limit: number = 60): Promise<any> {
     try {
@@ -1611,9 +1622,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // King of the Hill (frontend-api-v3)
-  // =====================================================
 
   private async getKingOfTheHill(): Promise<any> {
     try {
@@ -1630,9 +1638,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Currently live tokens (frontend-api-v3)
-  // =====================================================
 
   private async getCurrentlyLive(limit: number = 20, offset: number = 0): Promise<any> {
     try {
@@ -1653,35 +1658,42 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Featured tokens by time window (frontend-api-v3)
-  // =====================================================
 
   private async getFeaturedTokens(timeWindow: string = '1h', limit: number = 20, offset: number = 0): Promise<any> {
     try {
       const allowed = ['1h', '6h', '24h'];
       const safeWindow = allowed.includes(timeWindow) ? timeWindow : '1h';
       const safeLimit = Math.min(Math.max(limit, 1), 50);
+
+
       const res = await this.pumpFetch(
         `${PUMP_API_URL}/coins/featured/${safeWindow}?limit=${safeLimit}&offset=${offset}&includeNsfw=false`
       );
-      if (!res.ok) return { error: `Failed to fetch featured tokens: ${res.status}` };
+      if (res.ok) {
+        const data = await res.json() as PumpToken[];
+        return {
+          timeWindow: safeWindow,
+          tokens: data.map(d => this.pumpTokenToInfo(d)),
+        };
+      }
 
-      const data = await res.json() as PumpToken[];
+
+      const sortMap: Record<string, string> = { '1h': 'last_trade_timestamp', '6h': 'last_trade_timestamp', '24h': 'market_cap' };
+      const fallbackRes = await this.pumpFetch(
+        `${PUMP_API_URL}/coins?offset=${offset}&limit=${safeLimit}&sort=${sortMap[safeWindow] || 'last_trade_timestamp'}&order=DESC&includeNsfw=false`
+      );
+      if (!fallbackRes.ok) return { error: `Featured fetch failed: ${res.status} / ${fallbackRes.status}`, tokens: [] };
+
+      const fallbackData = await fallbackRes.json() as PumpToken[];
       return {
-        description: `Featured/trending tokens in the last ${safeWindow}`,
         timeWindow: safeWindow,
-        totalFound: data.length,
-        tokens: data.map(d => this.pumpTokenToInfo(d)),
+        tokens: fallbackData.map(d => this.pumpTokenToInfo(d)),
       };
     } catch (err: any) {
-      return { error: err.message };
+      return { error: err.message, tokens: [] };
     }
   }
 
-  // =====================================================
-  // Wallet token balances on pump.fun (frontend-api-v3)
-  // =====================================================
 
   private async getWalletBalances(address: string, limit: number = 50, offset: number = 0, minBalance: number = 0): Promise<any> {
     try {
@@ -1702,9 +1714,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Current metas/narratives (frontend-api-v3)
-  // =====================================================
 
   private async getCurrentMetas(): Promise<any> {
     try {
@@ -1721,9 +1730,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Search tokens by meta/narrative (frontend-api-v3)
-  // =====================================================
 
   private async searchByMeta(meta: string): Promise<any> {
     try {
@@ -1743,9 +1749,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // KOL scan coins (advanced-api-v2)
-  // =====================================================
 
   private async getKolCoins(): Promise<any> {
     try {
@@ -1762,9 +1765,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Batch get coins by mints (advanced-api-v2)
-  // =====================================================
 
   private async batchGetCoins(mints: string[]): Promise<any> {
     try {
@@ -1772,8 +1772,8 @@ export class PumpMonitorSkill implements Skill {
         return { error: 'mints must be a non-empty array of mint addresses' };
       }
       const safeMints = mints.slice(0, 50);
-      const res = await this.pumpFetch(`${ADVANCED_API_URL}/coins/mints`, {
-        method: 'POST',
+            const res = await this.pumpFetch(`${ADVANCED_API_URL}/coins/mints`, {
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mints: safeMints }),
       });
@@ -1790,9 +1790,69 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Batch market activity (swap-api v1 POST)
-  // =====================================================
+
+  private async batchEnrichOnChain(mints: string[]): Promise<any> {
+    if (!Array.isArray(mints) || mints.length === 0) {
+      return { requested: 0, found: 0, coins: [] };
+    }
+    const safeMints = mints.slice(0, 15);
+    const rpcUrl = this.ctx.config.rpc?.solana || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    const connection = new Connection(rpcUrl, 'confirmed');
+    const coins: any[] = [];
+
+    const tasks = safeMints.map(async (mint) => {
+      try {
+        const mintPk = new PublicKey(mint);
+
+
+        const bc = await this.pumpSdk.fetchBondingCurve(mintPk);
+        const virtualSolReserves = bc.virtualSolReserves.toNumber() / 1e9;
+        const virtualTokenReserves = bc.virtualTokenReserves.toNumber() / 1e6;
+        const realSolReserves = bc.realSolReserves.toNumber() / 1e9;
+        const totalSupply = bc.tokenTotalSupply.toNumber() / 1e6;
+
+        const mcapLamports = bondingCurveMarketCap({
+          mintSupply: bc.tokenTotalSupply,
+          virtualSolReserves: bc.virtualSolReserves,
+          virtualTokenReserves: bc.virtualTokenReserves,
+        }).toNumber();
+        const mcapSol = mcapLamports / 1e9;
+        const solPrice = getSolPriceUsd() || 130;
+        const mcapUsd = mcapSol * solPrice;
+
+        const bondingProgress = bc.complete ? 100 : Math.min((realSolReserves / 85) * 100, 100);
+
+
+        let numHolders = 0;
+        try {
+          const largestAccounts = await connection.getTokenLargestAccounts(mintPk);
+          numHolders = largestAccounts.value.filter(a => a.uiAmount && a.uiAmount > 0).length;
+        } catch {  }
+
+        coins.push({
+          mint,
+          coinMint: mint,
+          marketCap: mcapUsd,
+          usd_market_cap: mcapUsd,
+          bondingCurveProgress: bondingProgress,
+          numHolders,
+          holders: numHolders,
+          complete: bc.complete,
+          source: 'onchain',
+        });
+      } catch (err: any) {
+        this.logger.debug(`[PumpMonitor] On-chain enrich failed for ${mint.slice(0, 8)}: ${err.message}`);
+      }
+    });
+
+
+    for (let i = 0; i < tasks.length; i += 5) {
+      await Promise.allSettled(tasks.slice(i, i + 5));
+    }
+
+    return { requested: safeMints.length, found: coins.length, coins };
+  }
+
 
   private async batchGetMarketActivity(mints: string[], intervals?: string[]): Promise<any> {
     try {
@@ -1806,8 +1866,8 @@ export class PumpMonitorSkill implements Skill {
         'buyVolumeUSD', 'sellVolumeUSD', 'numBuyers', 'numSellers', 'priceChangePercent',
       ];
 
-      const res = await this.pumpFetch(`${SWAP_API_URL}/v1/coins/market-activity/batch`, {
-        method: 'POST',
+            const res = await this.pumpFetch(`${SWAP_API_URL}/v1/coins/market-activity/batch`, {
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ addresses: safeMints, intervals: safeIntervals, metrics }),
       });
@@ -1820,16 +1880,13 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Trenches — real-time new token filter
-  // =====================================================
 
   private startTrenches(params: Record<string, any>): any {
     if (this.trenchesActive) {
       return { status: 'already_running', config: this.trenchesConfig, stats: this.trenchesStats };
     }
 
-    // Apply config from params
+
     if (params.mode === 'alert' || params.mode === 'auto_buy') this.trenchesConfig.mode = params.mode;
     if (Array.isArray(params.metaKeywords)) this.trenchesConfig.metaKeywords = params.metaKeywords.map((k: string) => k.toLowerCase());
     if (typeof params.minScore === 'number') this.trenchesConfig.minScore = Math.max(0, Math.min(100, params.minScore));
@@ -1842,18 +1899,18 @@ export class PumpMonitorSkill implements Skill {
     if (typeof params.evalIntervalMs === 'number') this.trenchesConfig.evalIntervalMs = Math.max(5000, params.evalIntervalMs);
     if (typeof params.maxTokenAgeMs === 'number') this.trenchesConfig.maxTokenAgeMs = params.maxTokenAgeMs;
 
-    // Ensure NATS monitoring is active
+
     if (!this.monitoring) {
       this.startMonitoring();
     }
 
-    // Listen to token:new events
+
     this.trenchesTokenNewHandler = (data: any) => {
       this.trenchesOnNewToken(data);
     };
     this.eventBus.on('token:new', this.trenchesTokenNewHandler);
 
-    // Start evaluation loop
+
     this.trenchesInterval = setInterval(() => {
       this.trenchesEvalCycle().catch(err => {
         this.logger.error('Trenches eval cycle error', err?.message);
@@ -1867,7 +1924,7 @@ export class PumpMonitorSkill implements Skill {
     this.logger.info(`Trenches started [mode=${this.trenchesConfig.mode}, metas=${this.trenchesConfig.metaKeywords.join(',') || 'ALL'}]`);
 
     return {
-      status: 'started',
+            status: 'started',
       mode: this.trenchesConfig.mode,
       config: this.trenchesConfig,
     };
@@ -1923,7 +1980,7 @@ export class PumpMonitorSkill implements Skill {
     if (typeof params.minVolume5m === 'number') this.trenchesConfig.minVolume5m = params.minVolume5m;
     if (typeof params.maxTokenAgeMs === 'number') this.trenchesConfig.maxTokenAgeMs = params.maxTokenAgeMs;
 
-    // Hot-reload eval interval if changed
+
     if (typeof params.evalIntervalMs === 'number' && this.trenchesActive) {
       this.trenchesConfig.evalIntervalMs = Math.max(5000, params.evalIntervalMs);
       if (this.trenchesInterval) clearInterval(this.trenchesInterval);
@@ -1940,12 +1997,11 @@ export class PumpMonitorSkill implements Skill {
     };
   }
 
-  // ── Trenches: queue new tokens ──
 
   private trenchesOnNewToken(data: { mint: string; name: string; symbol: string; dev: string; timestamp: number }): void {
     this.trenchesStats.scanned++;
 
-    // Quick pre-filter: socials check
+
     const stored = this.ctx.memory.getToken(data.mint);
     const hasSocials = stored ? !!(stored.twitter || stored.telegram || stored.website) : false;
     if (this.trenchesConfig.requireSocials && !hasSocials) return;
@@ -1964,7 +2020,6 @@ export class PumpMonitorSkill implements Skill {
     });
   }
 
-  // ── Trenches: evaluation cycle ──
 
   private async trenchesEvalCycle(): Promise<void> {
     if (this.trenchesQueue.size === 0) return;
@@ -1972,7 +2027,7 @@ export class PumpMonitorSkill implements Skill {
     const now = Date.now();
     const batch: TrenchesQueueItem[] = [];
 
-    // Collect tokens from queue, skip expired
+
     for (const [mint, item] of this.trenchesQueue) {
       if (now - item.addedAt > this.trenchesConfig.maxTokenAgeMs) {
         this.trenchesQueue.delete(mint);
@@ -1983,23 +2038,24 @@ export class PumpMonitorSkill implements Skill {
 
     if (batch.length === 0) return;
 
-    // Clear processed items from queue
+
     for (const item of batch) {
       this.trenchesQueue.delete(item.mint);
     }
 
     const mints = batch.map(t => t.mint);
 
-    // Fetch batch market activity + current metas in parallel
-    const [activityResult, metasResult] = await Promise.allSettled([
+
+    const [activityResult, metasResult, coinsResult] = await Promise.allSettled([
       this.batchGetMarketActivity(mints, ['5m', '1h']),
       this.fetchCurrentMetasCached(),
+      this.batchGetCoins(mints),
     ]);
 
     const activity: Record<string, any> = {};
     if (activityResult.status === 'fulfilled' && activityResult.value.data) {
       const raw = activityResult.value.data;
-      // Response is keyed by mint address
+
       if (typeof raw === 'object') {
         for (const [mint, data] of Object.entries(raw)) {
           activity[mint] = data;
@@ -2018,11 +2074,29 @@ export class PumpMonitorSkill implements Skill {
       }
     }
 
-    // Score each token
+
+    const coinData: Record<string, any> = {};
+    if (coinsResult.status === 'fulfilled') {
+      const val = coinsResult.value;
+      if (val?.coins && Array.isArray(val.coins)) {
+        for (const coin of val.coins) {
+          const key = coin?.coinMint || coin?.mint;
+          if (key) coinData[key] = coin;
+        }
+        this.logger.debug(`[Trenches] batchGetCoins: ${Object.keys(coinData).length}/${mints.length} coins enriched`);
+      } else {
+        this.logger.warn(`[Trenches] batchGetCoins unexpected shape: ${JSON.stringify(val).slice(0, 200)}`);
+      }
+    } else {
+      this.logger.warn(`[Trenches] batchGetCoins rejected: ${coinsResult.reason?.message || 'unknown'}`);
+    }
+
+
     for (const item of batch) {
       this.trenchesStats.evaluated++;
       const tokenActivity = activity[item.mint] || {};
-      const score = this.trenchesScoreToken(item, tokenActivity, currentMetas);
+      const coin = coinData[item.mint];
+      const score = this.trenchesScoreToken(item, tokenActivity, currentMetas, coin);
 
       if (score.total >= this.trenchesConfig.minScore) {
         this.trenchesStats.passed++;
@@ -2031,6 +2105,10 @@ export class PumpMonitorSkill implements Skill {
 
         if (this.trenchesConfig.mode === 'alert') {
           this.trenchesStats.alerted++;
+
+          const coinMcap = coin?.marketCap || coin?.usd_market_cap || coin?.market_cap || 0;
+          const coinBonding = coin?.bondingCurveProgress ?? (coin?.complete ? 100 : 0);
+          const coinHolders = Number(coin?.numHolders || coin?.holders) || 0;
           const alert = {
             mint: item.mint,
             name: item.name,
@@ -2040,6 +2118,13 @@ export class PumpMonitorSkill implements Skill {
             activity: tokenActivity,
             reason,
             timestamp: now,
+            mcap: coinMcap,
+            bondingProgress: coinBonding,
+            holders: coinHolders,
+            description: item.description || coin?.description || '',
+            twitter: item.twitter || coin?.twitter || '',
+            telegram: item.telegram || coin?.telegram || '',
+            website: item.website || coin?.website || '',
           };
           this.eventBus.emit('trenches:alert', alert);
           this.trenchesRecentAlerts.push({ mint: item.mint, name: item.name, symbol: item.symbol, score: score.total, reason, timestamp: now });
@@ -2060,7 +2145,7 @@ export class PumpMonitorSkill implements Skill {
             timestamp: now,
           });
 
-          // Also emit signal:buy so the trading pipeline can pick it up
+
           this.eventBus.emit('signal:buy', {
             mint: item.mint,
             score: score.total,
@@ -2077,21 +2162,21 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // ── Trenches: scoring engine ──
 
   private trenchesScoreToken(
     item: TrenchesQueueItem,
     activity: any,
     currentMetas: string[],
+    coin?: any,
   ): { total: number; matchedMetas: string[]; reasons: string[] } {
     let total = 0;
     const reasons: string[] = [];
     const matchedMetas: string[] = [];
 
-    // 1. Meta/narrative match (30 points)
+
     const nameDesc = `${item.name} ${item.symbol} ${item.description || ''}`.toLowerCase();
     if (this.trenchesConfig.metaKeywords.length === 0) {
-      // No filter — check if matches any current trending meta
+
       for (const meta of currentMetas) {
         if (nameDesc.includes(meta)) {
           matchedMetas.push(meta);
@@ -2102,7 +2187,7 @@ export class PumpMonitorSkill implements Skill {
         reasons.push(`Matches trending metas: ${matchedMetas.join(', ')}`);
       }
     } else {
-      // Check against user-configured keywords
+
       for (const kw of this.trenchesConfig.metaKeywords) {
         if (nameDesc.includes(kw)) {
           matchedMetas.push(kw);
@@ -2114,14 +2199,17 @@ export class PumpMonitorSkill implements Skill {
       }
     }
 
-    // 2. Social presence (20 points)
+
     let socialScore = 0;
-    if (item.twitter) { socialScore += 8; reasons.push('Has Twitter'); }
-    if (item.telegram) { socialScore += 6; reasons.push('Has Telegram'); }
-    if (item.website) { socialScore += 6; reasons.push('Has Website'); }
+    const twitter = item.twitter || coin?.twitter || '';
+    const telegram = item.telegram || coin?.telegram || '';
+    const website = item.website || coin?.website || '';
+    if (twitter) { socialScore += 8; reasons.push('Has Twitter'); }
+    if (telegram) { socialScore += 6; reasons.push('Has Telegram'); }
+    if (website) { socialScore += 6; reasons.push('Has Website'); }
     total += socialScore;
 
-    // 3. Market activity — 5m window (30 points)
+
     const act5m = activity?.['5m'] || {};
     const numBuyers5m = act5m.numBuyers || 0;
     const volumeUSD5m = act5m.volumeUSD || 0;
@@ -2152,7 +2240,7 @@ export class PumpMonitorSkill implements Skill {
       if (priceChange5m > 20) reasons.push(`Price +${priceChange5m.toFixed(0)}% in 5m`);
     }
 
-    // 4. Market activity — 1h window (bonus 10 points)
+
     const act1h = activity?.['1h'] || {};
     const numBuyers1h = act1h.numBuyers || 0;
     const volumeUSD1h = act1h.volumeUSD || 0;
@@ -2166,7 +2254,7 @@ export class PumpMonitorSkill implements Skill {
       reasons.push(`$${volumeUSD1h.toFixed(0)} vol 1h`);
     }
 
-    // 5. Description quality (10 points)
+
     if (item.description && item.description.length > 20) {
       total += 5;
     }
@@ -2175,11 +2263,38 @@ export class PumpMonitorSkill implements Skill {
       reasons.push('Detailed description');
     }
 
+
+    if (coin) {
+      const mcap = coin.marketCap || coin.usd_market_cap || coin.market_cap || 0;
+      const bondPct = coin.bondingCurveProgress ?? 0;
+      const holders = Number(coin.numHolders || coin.holders) || 0;
+      if (mcap > 10000) { total += 5; reasons.push(`mcap $${(mcap/1000).toFixed(0)}k`); }
+      if (bondPct > 50) { total += 5; reasons.push(`bonding ${bondPct.toFixed(0)}%`); }
+      else if (bondPct > 20) { total += 3; reasons.push(`bonding ${bondPct.toFixed(0)}%`); }
+      if (holders > 50) { total += 5; reasons.push(`${holders} holders`); }
+      else if (holders > 10) { total += 2; reasons.push(`${holders} holders`); }
+    }
+
+
+    if (this.trendContext) {
+      const narrativeBonus = this.trendContext.scoreNarrativeMatch(
+        item.name + ' ' + item.symbol,
+        item.description,
+      );
+      if (narrativeBonus > 0) {
+        total += narrativeBonus;
+        reasons.push(`Narrative boost +${narrativeBonus} (news/X)`);
+      }
+      if (this.trendContext.isXTrackerMint(item.mint)) {
+        total += 15;
+        reasons.push('X Tracker callout +15');
+      }
+    }
+
     total = Math.min(100, total);
     return { total, matchedMetas, reasons };
   }
 
-  // ── Trenches: cached metas fetch ──
 
   private async fetchCurrentMetasCached(): Promise<any> {
     const now = Date.now();
@@ -2197,9 +2312,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Auto-analysis: AI batch analysis of new tokens
-  // =====================================================
 
   private startAutoAnalysis(batchSize?: number): any {
     if (this.autoAnalysisEnabled) {
@@ -2210,7 +2322,7 @@ export class PumpMonitorSkill implements Skill {
       this.autoAnalysisBatchSize = Math.min(batchSize, 200);
     }
 
-    // Ensure NATS monitoring is active
+
     if (!this.monitoring) {
       this.startMonitoring();
     }
@@ -2286,7 +2398,7 @@ export class PumpMonitorSkill implements Skill {
     try {
       const mints = batch.map(t => t.mint);
 
-      // Fetch batch market activity + current metas in parallel
+
       const [activityResult, metasResult] = await Promise.allSettled([
         this.batchGetMarketActivity(mints, ['5m', '1h']),
         this.fetchCurrentMetasCached(),
@@ -2313,7 +2425,7 @@ export class PumpMonitorSkill implements Skill {
         }
       }
 
-      // Score all tokens and rank them
+
       const scored = batch.map(item => {
         const tokenActivity = activity[item.mint] || {};
         const score = this.trenchesScoreToken(
@@ -2324,10 +2436,10 @@ export class PumpMonitorSkill implements Skill {
         return { ...item, score: score.total, reasons: score.reasons, matchedMetas: score.matchedMetas, activity: tokenActivity };
       });
 
-      // Sort by score descending
+
       scored.sort((a, b) => b.score - a.score);
 
-      // Build summary for AI — top candidates
+
       const topN = scored.filter(t => t.score > 20).slice(0, 15);
 
       if (topN.length === 0) {
@@ -2336,7 +2448,7 @@ export class PumpMonitorSkill implements Skill {
         return;
       }
 
-      // Build a compact summary and emit for AI to analyze
+
       const summary = topN.map((t, i) => {
         const act5m = t.activity?.['5m'] || {};
         const act1h = t.activity?.['1h'] || {};
@@ -2361,7 +2473,7 @@ export class PumpMonitorSkill implements Skill {
         timestamp: Date.now(),
       });
 
-      // Also emit as a chat request to the commander agent so it thinks about it
+
       this.eventBus.emit('agent:chat_request', {
         agentId: 'commander',
         message: `[AUTO-ANALYSIS] Batch #${this.autoAnalysisStats.batchesRun}: ${batch.length} new tokens scanned. ${topN.length} candidates found. Review the trenches:ai_pick event for details. Which tokens look most promising and why?`,
@@ -2374,9 +2486,6 @@ export class PumpMonitorSkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Helpers
-  // =====================================================
 
   private pumpTokenToInfo(data: PumpToken): TokenInfo {
     const solReserves = (data.virtual_sol_reserves || 0) / 1e9;

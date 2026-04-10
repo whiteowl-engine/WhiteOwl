@@ -1,4 +1,4 @@
-import { LoggerInterface } from './types';
+import { LoggerInterface } from './types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 

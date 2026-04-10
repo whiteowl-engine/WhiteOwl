@@ -1,20 +1,11 @@
-/**
- * Decision Explainer & Daily Report — Phase 4
- *
- * - Every trade:intent gets an explanation with factor breakdown
- * - Daily strategic report generated via LLM summarizing performance,
- *   lessons learned, and recommendations for tomorrow
- */
 
 import {
   EventBusInterface, LoggerInterface, LLMProvider, LLMMessage,
   TradeIntent, SessionStats,
-} from '../types';
-import { Memory } from '../memory';
-import { ContextualMemory } from '../memory/context';
-import { createLLMProvider } from '../llm';
-
-// ----- Trade Decision Explanation -----
+} from '../types.ts';
+import { Memory } from '../memory/index.ts';
+import { ContextualMemory } from '../memory/context.ts';
+import { createLLMProvider } from '../llm/index.ts';
 
 export interface TradeExplanation {
   intentId: string;
@@ -53,9 +44,6 @@ export class DecisionExplainer {
     this.contextMemory = opts.contextMemory;
   }
 
-  /**
-   * Start listening to trade intents and generating explanations.
-   */
   start(): void {
     this.eventBus.on('trade:intent', (intent) => {
       const explanation = this.explain(intent);
@@ -66,12 +54,12 @@ export class DecisionExplainer {
       this.logger.info(`[EXPLAIN] ${intent.action.toUpperCase()} ${intent.mint.slice(0, 8)}: ${explanation.summary}`);
     });
 
-    // Record contextual data on position close
+
     this.eventBus.on('position:closed', (data) => {
       const isWin = data.pnl > 0;
       this.contextMemory.recordHourlyOutcome(data.pnl, isWin);
 
-      // Record name pattern
+
       const token = this.memory.getToken(data.mint);
       if (token) {
         const nameWords = token.name.toLowerCase().split(/\s+/);
@@ -81,7 +69,7 @@ export class DecisionExplainer {
           }
         }
 
-        // Record dev reputation
+
         if (token.dev) {
           this.contextMemory.recordDevLaunch(token.dev, {
             isRug: data.pnlPercent < -50,
@@ -93,14 +81,11 @@ export class DecisionExplainer {
     });
   }
 
-  /**
-   * Build explanation for a trade intent by pulling all available context.
-   */
-  explain(intent: TradeIntent): TradeExplanation {
+explain(intent: TradeIntent): TradeExplanation {
     const factors: ExplanationFactor[] = [];
-    let confidence = 50; // base
+    let confidence = 50;
 
-    // Pipeline analysis
+
     const analysis = this.memory.getAnalysis(intent.mint);
     if (analysis) {
       factors.push({
@@ -128,7 +113,7 @@ export class DecisionExplainer {
       }
     }
 
-    // Dev reputation from contextual memory
+
     const token = this.memory.getToken(intent.mint);
     if (token?.dev) {
       const devRep = this.contextMemory.getDevReputation(token.dev);
@@ -147,7 +132,7 @@ export class DecisionExplainer {
       }
     }
 
-    // Holder data
+
     const holders = this.memory.getHolderData(intent.mint);
     if (holders) {
       factors.push({
@@ -159,7 +144,7 @@ export class DecisionExplainer {
       if (holders.isBundled) confidence -= 20;
     }
 
-    // Size
+
     factors.push({
       name: 'Position Size',
       value: `${intent.amountSol || 0} SOL`,
@@ -167,7 +152,7 @@ export class DecisionExplainer {
       weight: 0.05,
     });
 
-    // Agent reason
+
     if (intent.reason) {
       factors.push({
         name: 'Agent Reasoning',
@@ -206,7 +191,6 @@ export class DecisionExplainer {
   }
 }
 
-// ----- Daily Strategic Report -----
 
 export class DailyReportGenerator {
   private memory: Memory;
@@ -231,11 +215,7 @@ export class DailyReportGenerator {
     this.llm = llm;
   }
 
-  /**
-   * Generate a comprehensive daily report.
-   * Uses LLM if available, otherwise structured text.
-   */
-  async generateReport(): Promise<string> {
+async generateReport(): Promise<string> {
     const stats24h = this.memory.getStats('24h');
     const stats7d = this.memory.getStats('7d');
     const recentTrades = this.memory.getTradeHistory({ limit: 50 });
@@ -246,13 +226,13 @@ export class DailyReportGenerator {
     const recentExplanations = this.explainer.getRecentExplanations(20);
     const learningStats = this.memory.getLearningStats(1);
 
-    // Build data context
+
     const dataContext = this.buildDataContext(
       stats24h, stats7d, recentTrades, bestHours, worstHours,
       profitablePatterns, bestNarratives, recentExplanations, learningStats,
     );
 
-    // If LLM available, generate AI analysis
+
     if (this.llm) {
       try {
         const messages: LLMMessage[] = [
@@ -277,7 +257,7 @@ Be concise, data-driven, and actionable. Use bullet points.`,
       }
     }
 
-    // Fallback: structured report without LLM
+
     return this.buildStructuredReport(stats24h, stats7d, bestHours, profitablePatterns, bestNarratives, learningStats);
   }
 

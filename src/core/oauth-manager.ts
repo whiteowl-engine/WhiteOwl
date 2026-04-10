@@ -1,39 +1,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { LoggerInterface } from '../types';
-
-// =====================================================
-// OAuth Manager — Device Flow & Token Refresh
-// =====================================================
-//
-// Supports OAuth for LLM providers where users already have a subscription
-// (GitHub Copilot, Google Cloud, Azure AD). This lets users access AI
-// through their existing subscription instead of paying for separate API keys.
-//
-// Flow:
-// 1. User runs: `axiom auth github` (or google, azure)
-// 2. System starts OAuth Device Authorization Grant
-// 3. User visits URL in browser, enters code
-// 4. System polls for token → saves encrypted to disk
-// 5. Token auto-refreshes before expiry
-//
-// Tokens stored in: data/oauth-tokens.json (encrypted with machine-specific key)
+import { LoggerInterface } from '../types.ts';
 
 export interface OAuthProviderConfig {
   name: string;
   clientId: string;
-  deviceAuthUrl: string;        // POST to get device_code + user_code
-  tokenUrl: string;             // POST to exchange device_code → access_token
+  deviceAuthUrl: string;
+  tokenUrl: string;
   scopes: string[];
-  tokenEndpointAuth?: 'body' | 'basic';  // How to send client_id
+  tokenEndpointAuth?: 'body' | 'basic';
 }
 
 export interface OAuthToken {
   provider: string;
   accessToken: string;
   refreshToken?: string;
-  expiresAt: number;            // Unix ms
+  expiresAt: number;
   scope: string;
   tokenType: string;
 }
@@ -46,36 +29,29 @@ interface DeviceCodeResponse {
   interval: number;
 }
 
-// =====================================================
-// Pre-configured OAuth providers
-// =====================================================
-
 export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
-  // GitHub Copilot — free with Copilot subscription
-  // Uses GitHub's Models API: https://models.inference.ai.azure.com
+
   github: {
     name: 'GitHub Copilot',
-    clientId: 'Iv1.b507a08c87ecfe98',  // VS Code's GitHub Copilot OAuth App (public)
+    clientId: 'Iv1.b507a08c87ecfe98',
     deviceAuthUrl: 'https://github.com/login/device/code',
     tokenUrl: 'https://github.com/login/oauth/access_token',
     scopes: ['read:user', 'repo'],
     tokenEndpointAuth: 'body',
   },
 
-  // Google Cloud — for Gemini / Vertex AI
   google: {
     name: 'Google Cloud',
-    clientId: '',  // User must provide their own Google Cloud OAuth client
+    clientId: '',
     deviceAuthUrl: 'https://oauth2.googleapis.com/device/code',
     tokenUrl: 'https://oauth2.googleapis.com/token',
     scopes: ['https://www.googleapis.com/auth/cloud-platform'],
     tokenEndpointAuth: 'body',
   },
 
-  // Azure AD — for Azure OpenAI
   azure: {
     name: 'Azure AD',
-    clientId: '',  // User must provide their own Azure AD app registration
+    clientId: '',
     deviceAuthUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode',
     tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
     scopes: ['https://cognitiveservices.azure.com/.default'],
@@ -93,25 +69,18 @@ export class OAuthManager {
   constructor(dataDir: string, logger?: LoggerInterface) {
     this.logger = logger;
     this.storagePath = path.join(dataDir, 'oauth-tokens.json');
-    // Machine-specific encryption key from hostname + username
+
     const machineId = `${process.env.COMPUTERNAME || 'whiteowl'}-${process.env.USERNAME || 'user'}-whiteowl-oauth`;
     this.encryptionKey = crypto.createHash('sha256').update(machineId).digest();
     this.loadTokens();
   }
 
-  // =====================================================
-  // Device Authorization Flow
-  // =====================================================
 
-  /**
-   * Start OAuth device flow for a provider.
-   * Returns the user_code and verification_uri for the user to visit.
-   */
-  async startDeviceFlow(providerName: string, clientIdOverride?: string): Promise<{
+async startDeviceFlow(providerName: string, clientIdOverride?: string): Promise<{
     userCode: string;
     verificationUri: string;
     expiresIn: number;
-    pollFn: () => Promise<boolean>;  // Call repeatedly until true
+    pollFn: () => Promise<boolean>;
   }> {
     const provider = OAUTH_PROVIDERS[providerName];
     if (!provider) {
@@ -123,14 +92,14 @@ export class OAuthManager {
       throw new Error(`No client_id configured for ${providerName}. Set OAUTH_${providerName.toUpperCase()}_CLIENT_ID in .env`);
     }
 
-    // Step 1: Request device code
+
     const params = new URLSearchParams({
       client_id: clientId,
       scope: provider.scopes.join(' '),
     });
 
     const dcResponse = await fetch(provider.deviceAuthUrl, {
-      method: 'POST',
+            method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
@@ -149,7 +118,7 @@ export class OAuthManager {
       `OAuth [${provider.name}]: Visit ${dcData.verification_uri} and enter code: ${dcData.user_code}`
     );
 
-    // Step 2: Return polling function
+
     const pollInterval = (dcData.interval || 5) * 1000;
     const expiresAt = Date.now() + dcData.expires_in * 1000;
 
@@ -167,7 +136,7 @@ export class OAuthManager {
       });
 
       const tokenResponse = await fetch(provider.tokenUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
@@ -178,7 +147,7 @@ export class OAuthManager {
       const tokenData = await tokenResponse.json() as any;
 
       if (tokenData.error === 'authorization_pending') {
-        return false; // Keep polling
+        return false;
       }
 
       if (tokenData.error === 'slow_down') {
@@ -190,14 +159,14 @@ export class OAuthManager {
         throw new Error(`OAuth token error: ${tokenData.error} — ${tokenData.error_description || ''}`);
       }
 
-      // Success!
+
       const token: OAuthToken = {
         provider: providerName,
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
         expiresAt: tokenData.expires_in
           ? Date.now() + tokenData.expires_in * 1000
-          : Date.now() + 3600 * 1000, // Default 1h
+          : Date.now() + 3600 * 1000,
         scope: tokenData.scope || provider.scopes.join(' '),
         tokenType: tokenData.token_type || 'Bearer',
       };
@@ -217,10 +186,7 @@ export class OAuthManager {
     };
   }
 
-  /**
-   * Run the full device flow synchronously (blocks until user authorizes or timeout).
-   */
-  async authenticateInteractive(providerName: string, clientIdOverride?: string): Promise<OAuthToken> {
+async authenticateInteractive(providerName: string, clientIdOverride?: string): Promise<OAuthToken> {
     const { userCode, verificationUri, pollFn } = await this.startDeviceFlow(providerName, clientIdOverride);
 
     console.log(`\n🔐 OAuth Login for ${OAUTH_PROVIDERS[providerName]?.name || providerName}`);
@@ -236,18 +202,12 @@ export class OAuthManager {
     return this.tokens.get(providerName)!;
   }
 
-  // =====================================================
-  // Token management
-  // =====================================================
 
-  /**
-   * Get a valid access token for a provider. Auto-refreshes if expired.
-   */
-  async getToken(providerName: string): Promise<string | null> {
+async getToken(providerName: string): Promise<string | null> {
     const token = this.tokens.get(providerName);
     if (!token) return null;
 
-    // Refresh if expiring within 5 minutes
+
     if (token.expiresAt - Date.now() < 5 * 60 * 1000) {
       const refreshed = await this.refreshToken(providerName);
       if (refreshed) return refreshed.accessToken;
@@ -256,17 +216,11 @@ export class OAuthManager {
     return token.accessToken;
   }
 
-  /**
-   * Check if a provider has a valid (or refreshable) token.
-   */
-  hasToken(providerName: string): boolean {
+hasToken(providerName: string): boolean {
     return this.tokens.has(providerName);
   }
 
-  /**
-   * Get token info without the actual secret.
-   */
-  getTokenInfo(providerName: string): {
+getTokenInfo(providerName: string): {
     authenticated: boolean;
     expiresAt?: number;
     scope?: string;
@@ -280,10 +234,7 @@ export class OAuthManager {
     };
   }
 
-  /**
-   * Revoke / forget a provider's token.
-   */
-  revokeToken(providerName: string): void {
+revokeToken(providerName: string): void {
     this.tokens.delete(providerName);
     const timer = this.refreshTimers.get(providerName);
     if (timer) clearTimeout(timer);
@@ -292,16 +243,10 @@ export class OAuthManager {
     this.logger?.info(`OAuth [${providerName}]: Token revoked`);
   }
 
-  /**
-   * Get all authenticated providers.
-   */
-  getAuthenticatedProviders(): string[] {
+getAuthenticatedProviders(): string[] {
     return Array.from(this.tokens.keys());
   }
 
-  // =====================================================
-  // Token refresh
-  // =====================================================
 
   private async refreshToken(providerName: string): Promise<OAuthToken | null> {
     const token = this.tokens.get(providerName);
@@ -318,7 +263,7 @@ export class OAuthManager {
       });
 
       const response = await fetch(provider.tokenUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
@@ -360,7 +305,7 @@ export class OAuthManager {
     const token = this.tokens.get(providerName);
     if (!token?.refreshToken) return;
 
-    // Refresh 5 minutes before expiry
+
     const refreshIn = Math.max(token.expiresAt - Date.now() - 5 * 60 * 1000, 60_000);
     const timer = setTimeout(() => {
       this.refreshToken(providerName).catch(() => {});
@@ -369,9 +314,6 @@ export class OAuthManager {
     this.refreshTimers.set(providerName, timer);
   }
 
-  // =====================================================
-  // Encrypted storage
-  // =====================================================
 
   private loadTokens(): void {
     try {
@@ -387,7 +329,7 @@ export class OAuthManager {
 
       this.logger?.debug(`OAuth: Loaded ${data.length} token(s) from disk`);
     } catch {
-      // Corrupted or missing file, ignore
+
     }
   }
 
@@ -423,10 +365,7 @@ export class OAuthManager {
     return decrypted;
   }
 
-  /**
-   * Cleanup timers on shutdown.
-   */
-  shutdown(): void {
+shutdown(): void {
     for (const timer of this.refreshTimers.values()) {
       clearTimeout(timer);
     }

@@ -1,20 +1,7 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface, WalletInterface,
-} from '../types';
-
-// =====================================================
-// Advanced Trader Skill
-//
-// Implements sophisticated trading strategies:
-// 1. DCA (Dollar Cost Averaging) — phased entry over N orders
-// 2. Trailing Stop-Loss — dynamic SL following price up by X%
-// 3. Grid Trading — buy/sell grid on bonding curve for scalping
-// 4. Snipe on Graduation — auto-buy on pump.fun AMM pool migration
-// 5. MEV Protection — Jito tip optimization, bundle priority
-// 6. Multi-DEX Routing — Jupiter + pump.fun + Orca + Meteora
-// 7. Position Scaling — pyramid in when conditions improve
-// =====================================================
+} from '../types.ts';
 
 interface DCAOrder {
   id: string;
@@ -36,12 +23,12 @@ interface TrailingStop {
   mint: string;
   symbol: string;
   trailPercent: number;
-  /** Highest price seen since activation */
+
   peakPrice: number;
-  /** Current stop-loss trigger price */
+
   stopPrice: number;
   entryPrice: number;
-  amountToSell: number; // 0-100 percent
+  amountToSell: number;
   status: 'active' | 'triggered' | 'cancelled';
   createdAt: number;
   lastUpdated: number;
@@ -55,7 +42,7 @@ interface GridConfig {
   upperPrice: number;
   gridLevels: number;
   amountPerLevel: number;
-  /** Grid orders: price → side */
+
   levels: Array<{ price: number; side: 'buy' | 'sell'; filled: boolean }>;
   status: 'active' | 'paused' | 'completed';
   createdAt: number;
@@ -78,9 +65,9 @@ interface ScalingRule {
   id: string;
   mint: string;
   symbol: string;
-  /** Add to position when price drops by X% from entry */
+
   dipPercent: number;
-  /** Max additional buys */
+
   maxScaleIns: number;
   completedScaleIns: number;
   perScaleSol: number;
@@ -94,7 +81,7 @@ export class AdvancedTraderSkill implements Skill {
     version: '1.0.0',
     description: 'Advanced trading: DCA, trailing stop-loss, grid trading, graduation sniping, MEV protection, multi-DEX routing, position scaling',
     tools: [
-      // DCA Tools
+
       {
         name: 'dca_create',
         description: 'Create a DCA (Dollar Cost Averaging) order — splits total buy into N smaller orders over time',
@@ -128,7 +115,7 @@ export class AdvancedTraderSkill implements Skill {
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // Trailing Stop-Loss
+
       {
         name: 'trailing_stop_set',
         description: 'Set a trailing stop-loss that follows price up. When price drops trailPercent% from peak, sells.',
@@ -161,7 +148,7 @@ export class AdvancedTraderSkill implements Skill {
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // Grid Trading
+
       {
         name: 'grid_create',
         description: 'Create a grid trading strategy — places buy/sell orders at price levels for range-bound scalping',
@@ -195,7 +182,7 @@ export class AdvancedTraderSkill implements Skill {
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // Graduation Sniping
+
       {
         name: 'graduation_watch',
         description: 'Watch a pump.fun token for graduation to pump.fun AMM pool — auto-buys on graduation event',
@@ -218,7 +205,7 @@ export class AdvancedTraderSkill implements Skill {
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
-      // MEV Protection
+
       {
         name: 'mev_config',
         description: 'Configure MEV protection: Jito tip amount, bundle priority, backrun protection',
@@ -232,7 +219,7 @@ export class AdvancedTraderSkill implements Skill {
         },
         riskLevel: 'write',
       },
-      // Multi-DEX Routing
+
       {
         name: 'route_best',
         description: 'Find the best route across all DEXes (Jupiter, pump.fun AMM, Orca, Meteora) for a swap',
@@ -247,7 +234,7 @@ export class AdvancedTraderSkill implements Skill {
         },
         riskLevel: 'read',
       },
-      // Position Scaling
+
       {
         name: 'scale_in_set',
         description: 'Set auto scale-in rule: buy more when price dips X% from entry (pyramid in)',
@@ -297,15 +284,12 @@ export class AdvancedTraderSkill implements Skill {
     this.logger = ctx.logger;
     this.eventBus = ctx.eventBus;
 
-    // Listen for graduation events → auto-buy watched tokens
     this.eventBus.on('token:graduated', (data) => {
       this.handleGraduation(data.mint, data.dex);
     });
 
-    // Periodic price check for trailing stops, grids, and scale-ins
     this.priceCheckTimer = setInterval(() => this.checkPrices(), 5_000);
 
-    // Listen for price updates
     this.eventBus.on('token:update', (snap) => {
       this.updateTrailingStop(snap.mint, snap.price);
       this.checkGridFills(snap.mint, snap.price);
@@ -340,9 +324,6 @@ export class AdvancedTraderSkill implements Skill {
     if (this.priceCheckTimer) clearInterval(this.priceCheckTimer);
   }
 
-  // ==========================================
-  // DCA (Dollar Cost Averaging)
-  // ==========================================
 
   private dcaCreate(params: {
     mint: string; symbol?: string; totalAmountSol: number;
@@ -370,7 +351,7 @@ export class AdvancedTraderSkill implements Skill {
 
     this.dcaOrders.set(id, dca);
 
-    // Execute first order immediately, then schedule rest
+
     this.executeDCAOrder(dca);
     const timer = setInterval(() => this.executeDCAOrder(dca), intervalMs);
     this.dcaTimers.set(id, timer);
@@ -419,9 +400,6 @@ export class AdvancedTraderSkill implements Skill {
     return { dcas: Array.from(this.dcaOrders.values()) };
   }
 
-  // ==========================================
-  // Trailing Stop-Loss
-  // ==========================================
 
   private trailingStopSet(params: {
     mint: string; symbol?: string; trailPercent: number;
@@ -453,14 +431,14 @@ export class AdvancedTraderSkill implements Skill {
     for (const stop of this.trailingStops.values()) {
       if (stop.mint !== mint || stop.status !== 'active') continue;
 
-      // Update peak price
+
       if (currentPrice > stop.peakPrice) {
         stop.peakPrice = currentPrice;
         stop.stopPrice = currentPrice * (1 - stop.trailPercent / 100);
         stop.lastUpdated = Date.now();
       }
 
-      // Check if stop triggered
+
       if (currentPrice <= stop.stopPrice && stop.peakPrice > 0) {
         stop.status = 'triggered';
         this.logger.trade(
@@ -488,9 +466,6 @@ export class AdvancedTraderSkill implements Skill {
     return { stops: Array.from(this.trailingStops.values()) };
   }
 
-  // ==========================================
-  // Grid Trading
-  // ==========================================
 
   private gridCreate(params: {
     mint: string; symbol?: string; lowerPrice: number;
@@ -503,7 +478,7 @@ export class AdvancedTraderSkill implements Skill {
     const gridLevels: GridConfig['levels'] = [];
     for (let i = 0; i <= levels; i++) {
       const price = params.lowerPrice + step * i;
-      // Lower half = buy, upper half = sell
+
       gridLevels.push({
         price,
         side: i < levels / 2 ? 'buy' : 'sell',
@@ -563,7 +538,7 @@ export class AdvancedTraderSkill implements Skill {
         }
       }
 
-      // Check if all levels filled
+
       if (grid.levels.every(l => l.filled)) {
         grid.status = 'completed';
         this.logger.info(`Grid completed: ${grid.symbol} | ${grid.totalFills} fills`);
@@ -582,9 +557,6 @@ export class AdvancedTraderSkill implements Skill {
     return { grids: Array.from(this.grids.values()) };
   }
 
-  // ==========================================
-  // Graduation Sniping
-  // ==========================================
 
   private graduationWatch(params: {
     mint: string; symbol?: string; buyAmountSol?: number;
@@ -628,7 +600,7 @@ export class AdvancedTraderSkill implements Skill {
         symbol: watch.symbol,
         amountSol: watch.buyAmountSol,
         slippageBps: watch.slippageBps,
-        priorityFeeSol: Math.max(this.mevConfig.jitoTipSol, 0.01), // Higher tip for graduation snipe
+        priorityFeeSol: Math.max(this.mevConfig.jitoTipSol, 0.01),
         reason: `Graduation snipe: ${watch.symbol} → ${dex}`,
         timestamp: Date.now(),
       });
@@ -641,9 +613,6 @@ export class AdvancedTraderSkill implements Skill {
     return { watches: Array.from(this.graduationWatches.values()) };
   }
 
-  // ==========================================
-  // MEV Protection Config
-  // ==========================================
 
   private setMevConfig(params: {
     jitoTipSol?: number; usePrivateTx?: boolean; maxPriorityFee?: number;
@@ -654,9 +623,6 @@ export class AdvancedTraderSkill implements Skill {
     return { status: 'updated', config: this.mevConfig };
   }
 
-  // ==========================================
-  // Multi-DEX Routing
-  // ==========================================
 
   private async routeBest(params: {
     inputMint: string; outputMint: string; amountSol: number;
@@ -668,10 +634,10 @@ export class AdvancedTraderSkill implements Skill {
 
     const routes: Array<{ dex: string; outAmount: number; priceImpact: number; error?: string }> = [];
 
-    // Query Jupiter
+
     try {
       const res = await fetch(
-        `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=200`,
+        `https://api.jup.ag/swap/v1/quote?inputMint=${tokenIn}&outputMint=${tokenOut}&amount=${amountIn}&slippageBps=50`,
         { signal: AbortSignal.timeout(5_000) }
       );
       if (res.ok) {
@@ -686,12 +652,11 @@ export class AdvancedTraderSkill implements Skill {
       routes.push({ dex: 'Jupiter', outAmount: 0, priceImpact: 0, error: e.message });
     }
 
-    // Query pump.fun AMM (tokens migrated from bonding curve)
     try {
       const res = await fetch(
         `https://pumpportal.fun/api/trade-local`,
         {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             publicKey: this.ctx.wallet.getAddress(),
@@ -717,7 +682,6 @@ export class AdvancedTraderSkill implements Skill {
       routes.push({ dex: 'pump.fun AMM', outAmount: 0, priceImpact: 0, error: e.message });
     }
 
-    // Sort by best output
     routes.sort((a, b) => b.outAmount - a.outAmount);
     const best = routes[0];
 
@@ -729,10 +693,6 @@ export class AdvancedTraderSkill implements Skill {
       routes,
     };
   }
-
-  // ==========================================
-  // Position Scaling (Pyramid In)
-  // ==========================================
 
   private scaleInSet(params: {
     mint: string; symbol?: string; dipPercent: number;
@@ -765,7 +725,7 @@ export class AdvancedTraderSkill implements Skill {
         continue;
       }
 
-      // Check if price dipped enough from entry
+
       const dipFromEntry = ((rule.entryPrice - currentPrice) / rule.entryPrice) * 100;
       const nextDipTarget = rule.dipPercent * (rule.completedScaleIns + 1);
 
@@ -795,12 +755,9 @@ export class AdvancedTraderSkill implements Skill {
     return { rules: Array.from(this.scalingRules.values()) };
   }
 
-  // ==========================================
-  // Periodic price checking for active orders
-  // ==========================================
 
   private async checkPrices(): Promise<void> {
-    // Cleanup expired graduation watches
+
     for (const [id, watch] of this.graduationWatches) {
       if (watch.status === 'watching' && Date.now() > watch.expiresAt) {
         watch.status = 'expired';

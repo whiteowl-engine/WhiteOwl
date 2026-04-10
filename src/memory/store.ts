@@ -1,4 +1,4 @@
-import { Database } from './sql-compat';
+import { Database } from './sql-compat.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 

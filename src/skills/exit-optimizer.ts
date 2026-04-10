@@ -1,25 +1,10 @@
-import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface, Position } from '../types';
-
-// =====================================================
-// Exit Optimizer — AI-Powered Sell Strategy
-//
-// The bot buys well but sells poorly. This skill fixes that.
-// Monitors open positions and decides WHEN to exit:
-//
-// - Volume decay: dropping volume → dying token → exit
-// - Momentum reversal: price peaked and turning → partial exit
-// - Holder exodus: holders decreasing → smart money leaving
-// - Dev selling: dev dumped → instant exit
-// - Partial profit taking: +100% → sell 50%, +200% → sell 25%
-// - Time-based decay: >30min no growth on memecoin = dead
-// - Trailing peak: sell when price drops X% from ATH
-// =====================================================
+import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface, Position } from '../types.ts';
 
 interface PositionMonitor {
   mint: string;
   symbol: string;
   entryPrice: number;
-  peakPrice: number;        // All-time high since entry
+  peakPrice: number;
   entryTime: number;
   lastPrice: number;
   lastHolders: number;
@@ -27,33 +12,28 @@ interface PositionMonitor {
   priceHistory: { price: number; ts: number }[];
   volumeHistory: { volume: number; ts: number }[];
   holderHistory: { holders: number; ts: number }[];
-  partialsSold: number;     // How many partial exits done (0, 1, 2)
-  exitSignals: string[];    // Active exit signals
+  partialsSold: number;
+  exitSignals: string[];
 }
 
 interface ExitConfig {
-  // Profit-taking thresholds
-  partialTake1Pct: number;      // First partial at +X% (default 100 = 2x)
-  partialTake1SellPct: number;  // Sell X% of position (default 50)
-  partialTake2Pct: number;      // Second partial at +X% (default 300 = 4x)
-  partialTake2SellPct: number;  // Sell X% of remaining (default 50)
 
-  // Stop loss
-  stopLossPct: number;          // Hard stop at -X% (default 50)
-  trailingStopPct: number;      // Trailing from peak -X% (default 30)
+  partialTake1Pct: number;
+  partialTake1SellPct: number;
+  partialTake2Pct: number;
+  partialTake2SellPct: number;
 
-  // Time decay
-  maxHoldMinutes: number;       // Force exit after X min without growth (default 30)
-  growthThreshold: number;      // Min growth to reset timer (default 5%)
+  stopLossPct: number;
+  trailingStopPct: number;
 
-  // Volume decay
-  volumeDecayCandles: number;   // Consecutive declining volume candles (default 3)
+  maxHoldMinutes: number;
+  growthThreshold: number;
 
-  // Holder exit
-  holderDropPct: number;        // Exit if holders drop X% from peak (default 20)
+  volumeDecayCandles: number;
 
-  // Dev dump
-  devDumpExitEnabled: boolean;  // Exit if dev sells (default true)
+  holderDropPct: number;
+
+  devDumpExitEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: ExitConfig = {
@@ -156,7 +136,7 @@ export class ExitOptimizerSkill implements Skill {
   private monitors = new Map<string, PositionMonitor>();
   private enabled = false;
   private checkTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly CHECK_INTERVAL = 5_000; // Check every 5s
+  private readonly CHECK_INTERVAL = 5_000;
 
   private stats = {
     totalExits: 0,
@@ -176,7 +156,6 @@ export class ExitOptimizerSkill implements Skill {
     this.logger = ctx.logger;
     this.memory = ctx.memory;
 
-    // Track new positions
     this.eventBus.on('position:opened', (pos) => this.startMonitoring(pos));
     this.eventBus.on('position:updated', (pos) => this.updatePosition(pos));
     this.eventBus.on('position:closed', ({ mint }) => this.stopMonitoring(mint));
@@ -200,9 +179,6 @@ export class ExitOptimizerSkill implements Skill {
     this.monitors.clear();
   }
 
-  // =====================================================
-  // Position monitoring
-  // =====================================================
 
   private startMonitoring(pos: Position): void {
     if (this.monitors.has(pos.mint)) return;
@@ -241,7 +217,7 @@ export class ExitOptimizerSkill implements Skill {
 
     monitor.priceHistory.push({ price: pos.currentPrice, ts: Date.now() });
 
-    // Keep last 100 entries
+
     if (monitor.priceHistory.length > 100) {
       monitor.priceHistory = monitor.priceHistory.slice(-100);
     }
@@ -251,9 +227,6 @@ export class ExitOptimizerSkill implements Skill {
     this.monitors.delete(mint);
   }
 
-  // =====================================================
-  // Exit check engine (runs every 5s)
-  // =====================================================
 
   private enable(): { status: string } {
     this.enabled = true;
@@ -304,36 +277,36 @@ export class ExitOptimizerSkill implements Skill {
       ? ((monitor.peakPrice - monitor.lastPrice) / monitor.peakPrice) * 100
       : 0;
 
-    // 1. Hard stop-loss
+
     if (pnlPct <= -this.config.stopLossPct) {
       signals.push(`stop_loss_${pnlPct.toFixed(0)}%`);
     }
 
-    // 2. Trailing stop from peak
+
     if (drawdownFromPeak >= this.config.trailingStopPct && pnlPct > 0) {
       signals.push(`trailing_stop_${drawdownFromPeak.toFixed(0)}%_from_peak`);
     }
 
-    // 3. Partial profit-taking #1
+
     if (monitor.partialsSold === 0 && pnlPct >= this.config.partialTake1Pct) {
       signals.push(`partial_take_1_${pnlPct.toFixed(0)}%`);
     }
 
-    // 4. Partial profit-taking #2
+
     if (monitor.partialsSold === 1 && pnlPct >= this.config.partialTake2Pct) {
       signals.push(`partial_take_2_${pnlPct.toFixed(0)}%`);
     }
 
-    // 5. Time decay — no growth after X minutes
+
     if (holdMinutes >= this.config.maxHoldMinutes) {
-      // Check if price has grown since entry
+
       const growth = pnlPct;
       if (growth < this.config.growthThreshold) {
         signals.push(`time_decay_${holdMinutes.toFixed(0)}min`);
       }
     }
 
-    // 6. Volume decay — consecutive declining volume
+
     if (monitor.volumeHistory.length >= this.config.volumeDecayCandles) {
       const recent = monitor.volumeHistory.slice(-this.config.volumeDecayCandles);
       let declining = true;
@@ -348,7 +321,7 @@ export class ExitOptimizerSkill implements Skill {
       }
     }
 
-    // 7. Holder exodus
+
     if (monitor.holderHistory.length >= 2) {
       const peakHolders = Math.max(...monitor.holderHistory.map(h => h.holders));
       const currentHolders = monitor.holderHistory[monitor.holderHistory.length - 1].holders;
@@ -360,7 +333,7 @@ export class ExitOptimizerSkill implements Skill {
       }
     }
 
-    // 8. Momentum reversal — price peaked and dropping for 3+ consecutive reads
+
     if (monitor.priceHistory.length >= 4) {
       const last4 = monitor.priceHistory.slice(-4);
       let consecutive = 0;
@@ -383,34 +356,34 @@ export class ExitOptimizerSkill implements Skill {
   }
 
   private determineSellPercent(signals: string[], monitor: PositionMonitor): number {
-    // Hard stop = sell everything
+
     if (signals.some(s => s.startsWith('stop_loss') || s.startsWith('dev_dump'))) return 100;
 
-    // Trailing stop = sell everything remaining
+
     if (signals.some(s => s.startsWith('trailing_stop'))) return 100;
 
-    // Partial take #1
+
     if (signals.some(s => s.startsWith('partial_take_1'))) {
       monitor.partialsSold = 1;
       return this.config.partialTake1SellPct;
     }
 
-    // Partial take #2
+
     if (signals.some(s => s.startsWith('partial_take_2'))) {
       monitor.partialsSold = 2;
       return this.config.partialTake2SellPct;
     }
 
-    // Time decay = sell remaining
+
     if (signals.some(s => s.startsWith('time_decay'))) return 100;
 
-    // Holder exodus = sell most
+
     if (signals.some(s => s.startsWith('holder_exodus'))) return 80;
 
-    // Volume decay = sell half
+
     if (signals.includes('volume_decay')) return 50;
 
-    // Momentum reversal = sell partial
+
     if (signals.includes('momentum_reversal')) return 30;
 
     return 0;
@@ -421,7 +394,7 @@ export class ExitOptimizerSkill implements Skill {
 
     this.logger.trade(`EXIT SIGNAL: ${monitor.symbol} sell ${sellPct}% — ${signals.join(', ')}`);
 
-    // Update stats
+
     this.stats.totalExits++;
     if (signals.some(s => s.startsWith('partial_take'))) this.stats.profitTakes++;
     if (signals.some(s => s.startsWith('stop_loss'))) this.stats.stopLosses++;
@@ -434,7 +407,7 @@ export class ExitOptimizerSkill implements Skill {
     this.stats.avgHoldMinutes =
       (this.stats.avgHoldMinutes * (this.stats.totalExits - 1) + holdMin) / this.stats.totalExits;
 
-    // Emit signal:sell for the trading system
+
     this.eventBus.emit('signal:sell', {
       mint,
       reason,
@@ -442,7 +415,7 @@ export class ExitOptimizerSkill implements Skill {
       agentId: 'exit-optimizer',
     });
 
-    // For high urgency, also emit a trade:intent directly
+
     if (urgency === 'high') {
       this.eventBus.emit('trade:intent', {
         id: `exit_${Date.now()}_${mint.slice(0, 8)}`,
@@ -451,7 +424,7 @@ export class ExitOptimizerSkill implements Skill {
         mint,
         symbol: monitor.symbol,
         amountPercent: sellPct,
-        slippageBps: 3000, // Higher slippage for urgent exits
+        slippageBps: 3000,
         priorityFeeSol: 0.01,
         reason,
         timestamp: Date.now(),
@@ -479,14 +452,8 @@ export class ExitOptimizerSkill implements Skill {
     return { status: 'exit_initiated' };
   }
 
-  // =====================================================
-  // Public API — for external data feeds
-  // =====================================================
 
-  /**
-   * Feed volume data from external source (dex-screener, pump-monitor).
-   */
-  feedVolume(mint: string, volume: number): void {
+feedVolume(mint: string, volume: number): void {
     const monitor = this.monitors.get(mint);
     if (!monitor) return;
     monitor.lastVolume = volume;
@@ -494,10 +461,7 @@ export class ExitOptimizerSkill implements Skill {
     if (monitor.volumeHistory.length > 50) monitor.volumeHistory = monitor.volumeHistory.slice(-50);
   }
 
-  /**
-   * Feed holder count from external source (token-analyzer, holder-intelligence).
-   */
-  feedHolders(mint: string, holders: number): void {
+feedHolders(mint: string, holders: number): void {
     const monitor = this.monitors.get(mint);
     if (!monitor) return;
     monitor.lastHolders = holders;
@@ -505,10 +469,7 @@ export class ExitOptimizerSkill implements Skill {
     if (monitor.holderHistory.length > 50) monitor.holderHistory = monitor.holderHistory.slice(-50);
   }
 
-  /**
-   * Signal that dev is selling (from holder-intelligence or wallet-tracker).
-   */
-  signalDevSelling(mint: string): void {
+signalDevSelling(mint: string): void {
     if (!this.config.devDumpExitEnabled) return;
     const monitor = this.monitors.get(mint);
     if (!monitor) return;
@@ -517,9 +478,6 @@ export class ExitOptimizerSkill implements Skill {
     this.emitSellSignal(mint, monitor, ['dev_dump'], 'high', 100);
   }
 
-  // =====================================================
-  // Status / config
-  // =====================================================
 
   private updateConfig(updates: Partial<ExitConfig>): ExitConfig {
     Object.assign(this.config, updates);

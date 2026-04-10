@@ -1,14 +1,3 @@
-/**
- * sql-compat.ts — Drop-in replacement for better-sqlite3 using sql.js (pure WASM).
- *
- * Provides the same synchronous API surface used by the codebase:
- *   db.prepare(sql).run(...params)   → { changes, lastInsertRowid }
- *   db.prepare(sql).get(...params)   → row object | undefined
- *   db.prepare(sql).all(...params)   → row object[]
- *   db.exec(sql)
- *   db.pragma(str)
- *   db.close()
- */
 
 import initSqlJs, { Database as SqlJsDatabase, type SqlJsStatic } from 'sql.js';
 import * as fs from 'fs';
@@ -16,7 +5,6 @@ import * as path from 'path';
 
 let SQL: SqlJsStatic | null = null;
 
-/** Must be called once before createDatabase(). */
 export async function initDatabaseEngine(): Promise<void> {
   if (SQL) return;
   SQL = await initSqlJs();
@@ -26,8 +14,6 @@ export function getSqlEngine(): SqlJsStatic {
   if (!SQL) throw new Error('Database engine not initialized. Call initDatabaseEngine() first.');
   return SQL;
 }
-
-// ---------------------------------------------------------------------------
 
 interface RunResult {
   changes: number;
@@ -57,7 +43,6 @@ export class Database {
     this._filePath = filePath || null;
   }
 
-  /** Mimic better-sqlite3 prepare().run/get/all */
   prepare(sql: string): Statement {
     const db = this._db;
     const self = this;
@@ -67,8 +52,7 @@ export class Database {
         const flat = flattenParams(params);
         db.run(sql, flat);
         self._scheduleSave();
-        // sql.js doesn't expose changes/lastInsertRowid directly per statement,
-        // but we can query them right after.
+
         const changesRow = db.exec('SELECT changes() as c, last_insert_rowid() as r');
         const changes = changesRow.length > 0 ? (changesRow[0].values[0]?.[0] as number) ?? 0 : 0;
         const lastId = changesRow.length > 0 ? (changesRow[0].values[0]?.[1] as number) ?? 0 : 0;
@@ -128,8 +112,7 @@ export class Database {
     this._db.close();
   }
 
-  /** Force-save to disk now. */
-  private _flushSave(): void {
+private _flushSave(): void {
     if (this._saveTimer) {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
@@ -137,10 +120,9 @@ export class Database {
     this._saveToDisk();
   }
 
-  /** Debounced save — writes to disk at most every 2 seconds. */
-  private _scheduleSave(): void {
+private _scheduleSave(): void {
     if (!this._filePath) return;
-    if (this._saveTimer) return; // already scheduled
+    if (this._saveTimer) return;
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null;
       this._saveToDisk();
@@ -154,20 +136,19 @@ export class Database {
       const buffer = Buffer.from(data);
       fs.writeFileSync(this._filePath, buffer);
     } catch {
-      // Silently ignore write errors during close/shutdown
+
     }
   }
 }
 
-/** Flatten args: better-sqlite3 takes .run(a, b, c) while sql.js takes arrays */
 function flattenParams(params: any[]): any[] {
   if (params.length === 0) return [];
-  // If single array argument, use it directly
+
   if (params.length === 1 && Array.isArray(params[0])) return params[0];
   return params;
 }
 
-// Re-export as default namespace-like for type compat: Database.Database
+
 export default Database;
 (Database as any).Database = Database;
 

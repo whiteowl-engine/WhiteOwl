@@ -1,15 +1,28 @@
-#!/usr/bin/env node
 
-import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig, loadStrategy } from './config';
-import { Runtime } from './runtime';
-import { createAPIServer } from './api/server';
-import { Logger } from './logger';
-import { OAuthManager } from './core/oauth-manager';
-import { setOAuthManager } from './llm/providers';
-import { initDatabaseEngine } from './memory';
+const envPath = path.resolve('.env');
+if (fs.existsSync(envPath)) {
+  const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx < 1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (key && val && !process.env[key]) process.env[key] = val;
+  }
+}
+
+import * as readline from 'readline';
+import { loadConfig, loadStrategy } from './config.ts';
+import { Runtime } from './runtime.ts';
+import { createAPIServer } from './api/server.ts';
+import { Logger } from './logger.ts';
+import { OAuthManager } from './core/oauth-manager.ts';
+import { setOAuthManager } from './llm/providers.ts';
+import { initDatabaseEngine } from './memory/index.ts';
 
 const logger = new Logger();
 
@@ -27,18 +40,14 @@ async function main() {
   const args = process.argv.slice(2);
   const command = args[0] || 'interactive';
 
-  // Pre-initialize OAuth manager so config can detect OAuth-based providers
   const oauthManager = new OAuthManager('./data', logger);
   setOAuthManager(oauthManager);
 
-  // Load config
   const configPath = args.find(a => a.startsWith('--config='))?.split('=')[1];
   const config = loadConfig(configPath);
 
-  // Load strategies from ./strategies/ directory
   const strategiesDir = path.resolve('./strategies');
 
-  // Initialize WASM SQLite engine before creating runtime
   await initDatabaseEngine();
 
   const runtime = new Runtime(config);
@@ -57,11 +66,11 @@ async function main() {
 
   await runtime.boot();
 
-  // Start API server
+
   const api = createAPIServer(runtime, config.api.port, logger, config.api.key);
   api.start();
 
-  // Handle process signals
+
   const shutdown = async () => {
     logger.info('Received shutdown signal...');
     await runtime.shutdown();
@@ -85,6 +94,13 @@ async function main() {
       await runReport(runtime);
       break;
 
+    case 'server':
+
+      console.log(BANNER);
+      logger.info('Running in server-only mode. Use the dashboard at http://localhost:' + config.api.port + '/dashboard');
+      await new Promise(() => {});
+      break;
+
     case 'interactive':
     default:
       await runInteractive(runtime);
@@ -105,7 +121,7 @@ async function runMonitor(runtime: Runtime, args: string[]) {
     reportIntervalMinutes: 30,
   });
 
-  // Keep alive — reports printed via scheduler
+
   await new Promise(() => {});
 }
 
@@ -130,7 +146,7 @@ async function runAutopilot(runtime: Runtime, args: string[]) {
     reportIntervalMinutes: 15,
   });
 
-  // Keep alive
+
   await new Promise(() => {});
 }
 
@@ -346,7 +362,7 @@ async function runInteractive(runtime: Runtime) {
           process.exit(0);
 
         default:
-          // Treat as chat with default agent
+
           console.log('Thinking...');
           const chatResponse = await runtime.chat('scanner', input);
           console.log(`\n${chatResponse}\n`);

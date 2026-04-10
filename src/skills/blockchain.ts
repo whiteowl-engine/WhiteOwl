@@ -1,4 +1,4 @@
-import { Skill, SkillManifest, SkillContext, LoggerInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, LoggerInterface } from '../types.ts';
 
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -91,7 +91,19 @@ export class BlockchainSkill implements Skill {
       },
       {
         name: 'get_token_accounts',
-        description: 'Get all SPL token holdings of a wallet address',
+        description: 'Get all SPL token holdings of a wallet address, separated into fungible tokens and NFTs',
+        parameters: {
+          type: 'object',
+          properties: {
+            address: { type: 'string', description: 'Wallet address' },
+          },
+          required: ['address'],
+        },
+        riskLevel: 'read',
+      },
+      {
+        name: 'get_wallet_assets',
+        description: 'Full wallet overview: SOL balance + all token holdings + NFTs in one call. Use this when user asks "what do I have" or "show my portfolio/balance/assets/NFTs".',
         parameters: {
           type: 'object',
           properties: {
@@ -153,6 +165,7 @@ export class BlockchainSkill implements Skill {
       case 'get_token_supply': return this.getTokenSupply(params.mint);
       case 'get_recent_transactions': return this.getRecentTransactions(params.address, params.limit);
       case 'get_token_accounts': return this.getTokenAccounts(params.address);
+      case 'get_wallet_assets': return this.getWalletAssets(params.address);
       case 'get_created_tokens': return this.getCreatedTokens(params.address, params.limit);
       default: throw new Error(`Unknown tool: ${tool}`);
     }
@@ -160,7 +173,7 @@ export class BlockchainSkill implements Skill {
 
   async shutdown(): Promise<void> {}
 
-  // Expose for runtime hot-reload
+
   updateRpc(solanaRpc: string, heliusRpc?: string): void {
     this.solanaRpc = solanaRpc;
     if (heliusRpc !== undefined) this.heliusRpc = heliusRpc;
@@ -173,7 +186,7 @@ export class BlockchainSkill implements Skill {
   private async rpcCall(method: string, params: any[], rpcUrl?: string): Promise<any> {
     const url = rpcUrl || this.getRpcUrl();
     const res = await fetch(url, {
-      method: 'POST',
+            method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     });
@@ -190,7 +203,7 @@ export class BlockchainSkill implements Skill {
       activeRpc: this.getRpcUrl().substring(0, 50) + '...',
     };
 
-    // Test connectivity
+
     try {
       const start = Date.now();
       const health = await this.rpcCall('getHealth', [], this.solanaRpc);
@@ -211,7 +224,7 @@ export class BlockchainSkill implements Skill {
       }
     }
 
-    // Get slot to verify chain health
+
     try {
       status.currentSlot = await this.rpcCall('getSlot', []);
     } catch {}
@@ -303,26 +316,56 @@ export class BlockchainSkill implements Skill {
   }
 
   private async getTokenAccounts(address: string): Promise<any> {
-    const result = await this.rpcCall('getTokenAccountsByOwner', [
-      address,
-      { programId: TOKEN_PROGRAM },
-      { encoding: 'jsonParsed' },
+
+    const [result1, result2] = await Promise.all([
+      this.rpcCall('getTokenAccountsByOwner', [address, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }]),
+      this.rpcCall('getTokenAccountsByOwner', [address, { programId: TOKEN_2022_PROGRAM }, { encoding: 'jsonParsed' }]).catch(() => null),
     ]);
-    if (!result?.value) return { address, tokens: [], count: 0 };
-    const tokens = result.value
-      .map((a: any) => {
-        const info = a.account?.data?.parsed?.info;
-        if (!info) return null;
-        return {
-          mint: info.mint,
-          balance: info.tokenAmount?.uiAmount || 0,
-          decimals: info.tokenAmount?.decimals || 0,
-        };
-      })
-      .filter((t: any) => t && t.balance > 0)
-      .sort((a: any, b: any) => b.balance - a.balance)
-      .slice(0, 30);
-    return { address, count: tokens.length, tokens };
+    const allAccounts = [...(result1?.value || []), ...(result2?.value || [])];
+    if (allAccounts.length === 0) return { address, tokens: [], nfts: [], tokenCount: 0, nftCount: 0 };
+
+    const tokens: any[] = [];
+    const nfts: any[] = [];
+
+    for (const a of allAccounts) {
+      const info = a.account?.data?.parsed?.info;
+      if (!info) continue;
+      const balance = info.tokenAmount?.uiAmount || 0;
+      const decimals = info.tokenAmount?.decimals || 0;
+      if (balance <= 0) continue;
+
+      const entry = { mint: info.mint, balance, decimals };
+      if (decimals === 0 && balance === 1) {
+        nfts.push(entry);
+      } else {
+        tokens.push(entry);
+      }
+    }
+
+    tokens.sort((a: any, b: any) => b.balance - a.balance);
+    return {
+      address,
+      tokenCount: tokens.length,
+      nftCount: nfts.length,
+      tokens: tokens.slice(0, 50),
+      nfts: nfts.slice(0, 30),
+    };
+  }
+
+  private async getWalletAssets(address: string): Promise<any> {
+    const [solResult, tokenResult] = await Promise.all([
+      this.getSolBalance(address),
+      this.getTokenAccounts(address),
+    ]);
+    return {
+      address,
+      solBalance: solResult.balanceSol,
+      tokenCount: tokenResult.tokenCount,
+      nftCount: tokenResult.nftCount,
+      tokens: tokenResult.tokens,
+      nfts: tokenResult.nfts,
+      summary: `${solResult.balanceSol} SOL, ${tokenResult.tokenCount} tokens, ${tokenResult.nftCount} NFTs`,
+    };
   }
 
   private async identifyAddress(address: string): Promise<any> {
@@ -336,12 +379,12 @@ export class BlockchainSkill implements Skill {
       const owner = v.owner;
       const solBalance = v.lamports / 1_000_000_000;
 
-      // Executable = on-chain program
+
       if (v.executable) {
         return { address, type: 'program', owner, solBalance, hint: 'This is a deployed Solana program. Use get_account_info for details.' };
       }
 
-      // Token mint or token account (SPL Token Program)
+
       if (owner === TOKEN_PROGRAM || owner === TOKEN_2022_PROGRAM) {
         const parsed = v.data?.parsed;
         if (parsed?.type === 'mint') {
@@ -372,7 +415,7 @@ export class BlockchainSkill implements Skill {
         return { address, type: 'token_related', owner, hint: 'Owned by Token Program but type unclear.' };
       }
 
-      // System Program = regular wallet
+
       if (owner === SYSTEM_PROGRAM) {
         return {
           address,
@@ -383,7 +426,7 @@ export class BlockchainSkill implements Skill {
         };
       }
 
-      // Other program-owned account (e.g., stake, vote, etc.)
+
       return {
         address,
         type: 'program_account',
@@ -402,13 +445,13 @@ export class BlockchainSkill implements Skill {
     const createdTokens: any[] = [];
 
     try {
-      // Get transaction signatures for this address
+
       const sigs = await this.rpcCall('getSignaturesForAddress', [address, { limit: scanLimit }]);
       if (!sigs || sigs.length === 0) {
         return { address, createdTokens: [], count: 0, scanned: 0, note: 'No transactions found for this address.' };
       }
 
-      // Fetch transactions in batches of 5
+
       for (let i = 0; i < sigs.length; i += 5) {
         const batch = sigs.slice(i, i + 5);
         const txPromises = batch.map((s: any) =>
@@ -419,7 +462,7 @@ export class BlockchainSkill implements Skill {
         for (const tx of txResults) {
           if (!tx?.meta || tx.meta.err) continue;
 
-          // Check inner instructions and main instructions for token creation
+
           const allInstructions = [
             ...(tx.transaction?.message?.instructions || []),
             ...(tx.meta?.innerInstructions?.flatMap((ii: any) => ii.instructions) || []),
@@ -429,7 +472,7 @@ export class BlockchainSkill implements Skill {
             const parsed = ix.parsed;
             if (!parsed) continue;
 
-            // InitializeMint or InitializeMint2 from Token Program
+
             if (
               (parsed.type === 'initializeMint' || parsed.type === 'initializeMint2') &&
               (ix.programId === TOKEN_PROGRAM || ix.programId === TOKEN_2022_PROGRAM || ix.program === 'spl-token')
@@ -448,10 +491,10 @@ export class BlockchainSkill implements Skill {
               }
             }
 
-            // Also detect createAccount for mints (system instruction pairing)
+
             if (parsed.type === 'create' && ix.program === 'system' && parsed.info?.owner === TOKEN_PROGRAM) {
-              // This is a system create for a token — the InitializeMint will be in another instruction
-              // Already handled above
+
+
             }
           }
         }

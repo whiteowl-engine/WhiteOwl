@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import {
   AppConfig,
   ModelConfig,
@@ -11,27 +12,30 @@ import {
   AgentState,
   Position,
   StrategyConfig,
-} from './types';
-import { EventBus } from './core/event-bus';
-import { SkillLoader } from './core/skill-loader';
-import { AgentRunner } from './core/agent-runner';
-import { RiskManager } from './core/risk-manager';
-import { StrategyEngine } from './core/strategy';
-import { Scheduler } from './core/scheduler';
-import { MarketStateBuilder } from './core/market-state';
-import { getLLMProvider, getLLMProviderWithFallback } from './llm';
-import { Memory, createDatabase, initDatabaseEngine, ContextualMemory } from './memory';
-import { SolanaWallet } from './wallet/solana';
-import { getAllSkills } from './skills';
-import { Logger } from './logger';
-import { MultiAgentCoordinator } from './core/multi-agent';
-import { DecisionExplainer, DailyReportGenerator } from './core/decision-engine';
-import { MetricsCollector, BackupManager } from './core/metrics';
-import { PrivacyGuard, PrivacyConfig } from './core/privacy-guard';
-import { AutoApproveManager, AutoApproveLevel } from './core/auto-approve';
-import { OAuthManager } from './core/oauth-manager';
-import { setOAuthManager } from './llm/providers';
-import { BrowserService } from './core/browser';
+  LLMMessage,
+} from './types.ts';
+import { EventBus } from './core/event-bus.ts';
+import { SkillLoader } from './core/skill-loader.ts';
+import { AgentRunner } from './core/agent-runner.ts';
+import { RiskManager } from './core/risk-manager.ts';
+import { StrategyEngine } from './core/strategy.ts';
+import { Scheduler } from './core/scheduler.ts';
+import { MarketStateBuilder } from './core/market-state.ts';
+import { getLLMProvider, getLLMProviderWithFallback } from './llm/index.ts';
+import { Memory, createDatabase, initDatabaseEngine, ContextualMemory } from './memory/index.ts';
+import { SolanaWallet } from './wallet/solana.ts';
+import { getAllSkills } from './skills/index.ts';
+import { Logger } from './logger.ts';
+import { MultiAgentCoordinator } from './core/multi-agent.ts';
+import { DecisionExplainer, DailyReportGenerator } from './core/decision-engine.ts';
+import { MetricsCollector, BackupManager } from './core/metrics.ts';
+import { PrivacyGuard, PrivacyConfig } from './core/privacy-guard.ts';
+import { AutoApproveManager, AutoApproveLevel } from './core/auto-approve.ts';
+import { OAuthManager } from './core/oauth-manager.ts';
+import { setOAuthManager } from './llm/providers.ts';
+import { BrowserService } from './core/browser.ts';
+import { MCPManager } from './core/mcp-client.ts';
+import { JobManager } from './core/job-manager.ts';
 
 export class Runtime {
   private config: AppConfig;
@@ -39,6 +43,8 @@ export class Runtime {
   private eventBus: EventBus;
   private skillLoader: SkillLoader;
   private agents = new Map<string, AgentRunner>();
+
+  private chatSessions = new Map<string, { runner: AgentRunner; agentId: string; lastUsed: number }>();
   private riskManager: RiskManager;
   private strategyEngine: StrategyEngine;
   private scheduler: Scheduler;
@@ -56,6 +62,7 @@ export class Runtime {
   private backupManager!: BackupManager;
   private privacyGuard!: PrivacyGuard;
   private autoApprove!: AutoApproveManager;
+  private jobManager!: JobManager;
   private oauthManager: OAuthManager;
   private browserService: BrowserService;
   private agentCreationLock = false;
@@ -89,15 +96,23 @@ export class Runtime {
     this.backupManager = new BackupManager(config.memory.dbPath, config.memory.dbPath + '.backups', this.logger);
     this.autoApprove = new AutoApproveManager(this.eventBus, this.logger, config.autoApproveLevel || 'off');
 
-    // OAuth manager — reuse if already initialized (e.g. by index.ts for config detection)
+    this.jobManager = new JobManager(this.logger, this.eventBus, path.join(process.cwd(), 'data'));
+
+    try {
+      const savedApprovePath = path.join(process.cwd(), 'data', 'auto-approve.json');
+      if (fs.existsSync(savedApprovePath)) {
+        const saved = JSON.parse(fs.readFileSync(savedApprovePath, 'utf-8'));
+        if (saved.level && ['off', 'conservative', 'moderate', 'aggressive', 'full'].includes(saved.level)) {
+          this.autoApprove.setLevel(saved.level);
+        }
+      }
+    } catch {  }
+
     this.oauthManager = new OAuthManager('./data', this.logger);
     setOAuthManager(this.oauthManager);
 
-    // Browser service for headless web browsing (Twitter login, page scraping)
     this.browserService = new BrowserService('./data', this.logger);
 
-    // Encrypted API key storage
-    const os = require('os');
     const machineId = (os.hostname() || 'axiom') + ':' + (os.userInfo().username || 'user');
     this.encryptionKey = crypto.createHash('sha256').update(machineId).digest();
     this.apiKeysPath = path.join('./data', 'api-keys.enc');
@@ -105,18 +120,15 @@ export class Runtime {
     this.loadApiKeysFromDisk();
   }
 
-
   async boot(): Promise<void> {
     this.startTime = Date.now();
     this.logger.info('Booting WhiteOwl...');
 
-    // Register all skills
     const skills = getAllSkills();
     for (const skill of skills) {
       this.skillLoader.register(skill);
     }
 
-    // Initialize skills with context
     await this.skillLoader.initializeAll({
       eventBus: this.eventBus,
       memory: this.memory,
@@ -126,35 +138,79 @@ export class Runtime {
       browser: this.browserService,
     });
 
-    // Privacy guard configuration
+    const skillsMdDir = path.join(process.cwd(), 'skills');
+    const mdLoaded = this.skillLoader.loadMarkdownSkills(skillsMdDir);
+    if (mdLoaded > 0) this.logger.info(`Loaded ${mdLoaded} SKILL.md skill(s) from ${skillsMdDir}`);
+    this.skillLoader.watchSkillsDir(skillsMdDir);
+
+
+    const mcpManager = new MCPManager(this.logger);
+    const mcpSkills = mcpManager.loadConfig();
+    for (const mcpSkill of mcpSkills) {
+      this.skillLoader.register(mcpSkill);
+    }
+
+
     const privacyConfig: Partial<PrivacyConfig> = this.config.privacy || {};
     this.privacyGuard = new PrivacyGuard(
       getLLMProvider(this.config.agents[0]?.model || { provider: 'openai', model: 'gpt-4o' } as any),
       privacyConfig,
       this.logger,
     );
-    // Register our own wallet for consistent masking
+
     if (this.wallet.hasWallet()) {
       this.privacyGuard.registerWallet(this.wallet.getAddress(), 'MY_WALLET');
     }
 
-    // Connect auto-approve with risk manager
+
     this.autoApprove.setRiskChecker((intent) => this.riskManager.validateIntent(intent));
 
-    // Create agents from config — wrap LLM with PrivacyGuard
-    // Load saved model config from disk (persisted via Settings)
+
     try {
       if (fs.existsSync(this.modelConfigPath)) {
         const saved = JSON.parse(fs.readFileSync(this.modelConfigPath, 'utf-8'));
         if (saved.provider && saved.model) {
           const savedMc: ModelConfig = { provider: saved.provider as any, model: saved.model };
-          const providerEnvMap: Record<string, string> = {
-            openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY',
-            groq: 'GROQ_API_KEY', deepseek: 'DEEPSEEK_API_KEY',
-            mistral: 'MISTRAL_API_KEY', openrouter: 'OPENROUTER_API_KEY',
-            google: 'GOOGLE_API_KEY', xai: 'XAI_API_KEY', cursor: 'CURSOR_API_KEY',
+
+          if (String(savedMc.provider) === 'cursor') {
+            savedMc.provider = 'copilot' as any;
+            if (!savedMc.model || savedMc.model === 'default') savedMc.model = 'gpt-4o';
+            this.logger.warn(`cursor provider migrated to copilot.`);
+            try {
+              fs.writeFileSync(this.modelConfigPath, JSON.stringify({ provider: savedMc.provider, model: savedMc.model }, null, 2), 'utf-8');
+            } catch {  }
+          }
+
+          if (String(savedMc.provider) === 'vscode-bridge') {
+            savedMc.provider = 'copilot' as any;
+            if (!savedMc.model || savedMc.model === 'default') savedMc.model = 'gpt-4o';
+            this.logger.warn(`vscode-bridge provider migrated to copilot.`);
+            try {
+              fs.writeFileSync(this.modelConfigPath, JSON.stringify({ provider: savedMc.provider, model: savedMc.model }, null, 2), 'utf-8');
+            } catch {  }
+          }
+
+          const geminiModelMigrations: Record<string, string> = {
+            'gemini-2.5-pro-preview-06-05': 'gemini-2.5-pro',
+            'gemini-2.5-flash-preview-05-20': 'gemini-2.5-flash',
+            'gemini-2.5-pro-preview-03-25': 'gemini-2.5-pro',
+            'gemini-2.0-flash': 'gemini-2.5-flash',
+            'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite',
+            'gemini-1.5-pro': 'gemini-2.5-pro',
+            'gemini-1.5-flash': 'gemini-2.5-flash',
+            'gemini-3-pro': 'gemini-3.1-pro-preview',
+            'gemini-3-pro-preview': 'gemini-3.1-pro-preview',
           };
-          const envKey = providerEnvMap[savedMc.provider];
+          if ((savedMc.provider === 'google' || savedMc.provider === 'google-oauth' || savedMc.provider === 'copilot') && geminiModelMigrations[savedMc.model]) {
+            const newModel = geminiModelMigrations[savedMc.model];
+            this.logger.warn(`Migrated Gemini model: ${savedMc.model} → ${newModel}`);
+            savedMc.model = newModel;
+            try {
+              fs.writeFileSync(this.modelConfigPath, JSON.stringify({ provider: savedMc.provider, model: newModel }, null, 2), 'utf-8');
+            } catch {  }
+          }
+
+          const envKey = Runtime.PROVIDER_ENV_MAP[savedMc.provider];
           if (envKey && process.env[envKey]) savedMc.apiKey = process.env[envKey];
           if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
           if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
@@ -183,22 +239,29 @@ export class Runtime {
         eventBus: this.eventBus,
         logger: this.logger,
         marketState: this.marketState,
+        wallet: this.wallet,
       });
+      runner.setAutoApproveLevel(this.autoApprove.getLevel() as any);
 
       this.riskManager.setAgentLimits(agentConfig.id, agentConfig.riskLimits);
       this.agents.set(agentConfig.id, runner);
     }
 
-    // Restore custom agents from disk
+
     this.restoreCustomAgents();
 
-    // Start decision explainer (generates explanations for every trade intent)
+
+    for (const [id, agent] of this.agents) {
+      try { agent.loadSession(); } catch {}
+    }
+
+
     this.decisionExplainer.start();
 
-    // Start metrics collection
+
     this.metricsCollector.start();
 
-    // Give daily report generator access to LLM from first agent
+
     const firstAgentConfig = this.config.agents[0];
     if (firstAgentConfig) {
       const reportLLM = firstAgentConfig.fallbackModels?.length
@@ -207,16 +270,16 @@ export class Runtime {
       this.dailyReport.setLLM(reportLLM);
     }
 
-    // Wire up the trade pipeline: intent -> auto-approve / risk check -> approve/reject
+
     this.eventBus.on('trade:intent', async (intent) => {
-      // Step 1: Try auto-approve (includes risk check if configured)
+
       const autoResult = await this.autoApprove.evaluate(intent);
       if (autoResult.autoApproved) {
-        // Already approved and event emitted by AutoApproveManager
+
         return;
       }
 
-      // Step 2: If not auto-rejected, go through manual risk check
+
       if (autoResult.requiresManual) {
         const result = this.riskManager.validateIntent(intent);
         if (result.approved) {
@@ -227,35 +290,197 @@ export class Runtime {
           this.logger.warn(`REJECTED: ${result.reason}`);
         }
       } else {
-        // Auto-rejected (e.g., security check failed)
+
         this.eventBus.emit('trade:rejected', { intentId: intent.id, reason: autoResult.reason });
         this.logger.warn(`AUTO-REJECTED: ${autoResult.reason}`);
       }
     });
 
-    // Schedule recurring tasks
+
     this.registerScheduledTasks();
 
-    this.ready = true;
 
-    // Restore learned pipeline weights from previous sessions
-    const savedWeights = this.memory.loadPipelineWeights();
-    if (savedWeights) {
-      this.logger.info(`Restored pipeline weights from DB: ${JSON.stringify(savedWeights)}`);
-      // Will be picked up when pipeline starts via event
-      this.eventBus.once('system:ready', () => {
-        // Deferred so pipeline can subscribe first
-        const stats = this.memory.getLearningStats(7);
-        if (stats.totalTrades >= 5) {
-          this.eventBus.emit('pipeline:learn', {
-            winSignals: stats.winSignals,
-            loseSignals: stats.loseSignals,
-            winRate: stats.winRate,
-            totalTrades: stats.totalTrades,
+    this.jobManager.setChatFunction((agentId, message, jobId, freshSession) => {
+      let sessionId: string;
+      if (freshSession && jobId) {
+
+        sessionId = `_job_${jobId}_summary_${Date.now()}`;
+        this.logger.info(`[Jobs] Fresh session for summary: ${sessionId}`);
+      } else {
+        sessionId = jobId ? `_job_${jobId}` : `_job_${agentId}_${Date.now()}`;
+      }
+      const allowedSkills = jobId ? this.jobManager.getJobAllowedSkills(jobId) : undefined;
+      return this.sessionChat(sessionId, message, agentId, undefined, allowedSkills ?? undefined);
+    });
+
+
+    this.jobManager.setSummaryFunction(async (prompt: string, jobId: string) => {
+      const agentConfig = this.config.agents[0];
+      if (!agentConfig) throw new Error('No agent config available for summary');
+
+      const baseLlm = agentConfig.fallbackModels?.length
+        ? getLLMProviderWithFallback([agentConfig.model, ...agentConfig.fallbackModels])
+        : getLLMProvider(agentConfig.model);
+
+      const messages: import('./types.ts').LLMMessage[] = [
+        {
+          role: 'system',
+          content: 'You are a concise reporting assistant. Summarize monitoring data into structured reports. Write in Russian. Do NOT call any tools — just write the report from the data provided.',
+        },
+        { role: 'user', content: prompt },
+      ];
+
+      this.logger.info(`[Jobs] Direct LLM summary call for ${jobId} (~${prompt.length} chars, no tools)`);
+      const response = await baseLlm.chat(messages, []);
+      this.logger.info(`[Jobs] Summary done: ${response.usage?.promptTokens || '?'}pt / ${response.usage?.completionTokens || '?'}ct`);
+
+
+      this.eventBus.emit('agent:llm_response' as any, {
+        agentId: `_job_${jobId}_summary`,
+        content: response.content.slice(0, 500),
+        toolCallsCount: 0,
+        round: 0,
+        usage: response.usage,
+      });
+
+      return response.content;
+    });
+
+    const jobsSkill = this.skillLoader.getSkill('background-jobs') as any;
+    if (jobsSkill?.setJobManager) jobsSkill.setJobManager(this.jobManager);
+    this.jobManager.start();
+
+
+    setInterval(() => this.cleanupIdleSessions(), 15 * 60 * 1000);
+
+
+    try {
+      const { NewsStore } = await import('./memory/news-store.ts');
+      const { NewsProcessor } = await import('./core/news-processor.ts');
+      const { NewsScheduler } = await import('./core/news-scheduler.ts');
+      const { NewsSignals } = await import('./core/news-signals.ts');
+
+      const newsStore = new NewsStore(this.memory.getDb());
+      const newsProcessor = new NewsProcessor({
+        store: newsStore,
+        eventBus: this.eventBus,
+        logger: this.logger,
+        portfolioMints: () => [],
+      });
+
+      const newsScheduler = new NewsScheduler({
+        logger: this.logger,
+        eventBus: this.eventBus,
+        store: newsStore,
+        processor: newsProcessor,
+      });
+
+      newsScheduler.start();
+
+
+      (this as any)._newsScheduler = newsScheduler;
+      (this as any)._newsStore = newsStore;
+
+
+      this.marketState.setNewsStore(newsStore);
+
+
+      const newsSignals = new NewsSignals({
+        logger: this.logger,
+        eventBus: this.eventBus,
+        getActiveMints: () => [],
+      });
+
+      this.logger.info('[News] Feed system initialized');
+
+
+      try {
+        const { TrendContext } = await import('./core/trend-context.ts');
+        const { SniperJob } = await import('./core/sniper-job.ts');
+
+        const trendContext = new TrendContext({
+          eventBus: this.eventBus,
+          logger: this.logger,
+        });
+        trendContext.setNewsStore(newsStore);
+
+
+        const pumpMon = this.skillLoader.getSkill('pump-monitor') as any;
+        if (pumpMon?.setTrendContext) {
+          pumpMon.setTrendContext(trendContext);
+        }
+
+        const sniperJob = new SniperJob({
+          eventBus: this.eventBus,
+          logger: this.logger,
+          trendContext,
+          marketState: this.marketState,
+          memory: this.memory,
+          contextMemory: this.contextMemory,
+        });
+
+
+        const firstAgent = this.config.agents?.[0];
+        if (firstAgent) {
+          const sniperLLM = firstAgent.fallbackModels?.length
+            ? getLLMProviderWithFallback([firstAgent.model, ...firstAgent.fallbackModels])
+            : getLLMProvider(firstAgent.model);
+          sniperJob.setLLMFunction(async (messages, _tools) => {
+            const resp = await sniperLLM.chat(messages, { max_tokens: 200 });
+            return resp;
+          });
+
+
+          trendContext.setLLMFunction(async (messages) => {
+            return sniperLLM.chat(messages, { max_tokens: 800 });
           });
         }
-      });
+
+
+        sniperJob.setTradeFunction(async (toolName, params) => {
+          return this.skillLoader.executeTool(toolName, params);
+        });
+
+
+        sniperJob.setBalanceFunction(async () => {
+          return this.wallet.getBalance();
+        });
+
+
+        if (this.browserService) {
+          sniperJob.setBrowserService(this.browserService);
+
+          try {
+            const cdpResult = await this.browserService.connectMainBrowser();
+            if (cdpResult.success) {
+              this.logger.info(`[Boot] Auto-connected Chrome CDP — Axiom ✓ GMGN ✓`);
+            } else {
+              this.logger.warn(`[Boot] Chrome CDP auto-connect failed: ${cdpResult.message}`);
+            }
+          } catch (e: any) {
+            this.logger.warn(`[Boot] Chrome CDP auto-connect error: ${e.message}`);
+          }
+        }
+
+        (this as any)._trendContext = trendContext;
+        (this as any)._sniperJob = sniperJob;
+
+
+        const shitTraderSkill = this.skillLoader.getSkill('shit-trader') as any;
+        if (shitTraderSkill?.setSniperJob) {
+          shitTraderSkill.setSniperJob(sniperJob);
+          this.logger.info('[Sniper] Wired into shit-trader skill');
+        }
+
+        this.logger.info('[Sniper] Degen Sniper ready (use /api/sniper/start to activate)');
+      } catch (err: any) {
+        this.logger.warn(`[Sniper] Init failed: ${err.message}`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[News] Feed system init failed: ${err.message}`);
     }
+
+    this.ready = true;
 
     this.eventBus.emit('system:ready', { timestamp: Date.now() });
     this.logger.info(`WhiteOwl ready | Wallet: ${this.wallet.hasWallet() ? this.wallet.getAddress() : 'NOT CONFIGURED'} | Agents: ${this.agents.size} | Skills: ${this.skillLoader.getAllManifests().length}`);
@@ -294,17 +519,17 @@ export class Runtime {
       },
     };
 
-    // Activate strategy if set
+
     if (opts.strategy) {
       this.strategyEngine.setActive(opts.strategy);
     }
 
-    // Start all agents with the configured autonomy level
+
     for (const [id, agent] of this.agents) {
       agent.start();
     }
 
-    // Schedule session reports
+
     this.scheduler.register('session-report', 'Session Report', async () => {
       if (this.session?.status !== 'running') return;
       const stats = this.getSessionStats();
@@ -320,7 +545,7 @@ export class Runtime {
     }, this.session.reportInterval);
     this.scheduler.start('session-report');
 
-    // Schedule session expiry check
+
     if (this.session.endsAt) {
       this.scheduler.register('session-expiry', 'Session Expiry Check', async () => {
         if (this.session && this.session.endsAt && Date.now() >= this.session.endsAt) {
@@ -331,7 +556,7 @@ export class Runtime {
       this.scheduler.start('session-expiry');
     }
 
-    // Track stats from events
+
     this.eventBus.on('token:new', () => {
       if (this.session) this.session.stats.tokensScanned++;
     });
@@ -351,7 +576,7 @@ export class Runtime {
       this.session.stats.worstDrawdownSol = Math.min(this.session.stats.worstDrawdownSol, this.session.stats.totalPnlSol);
     });
 
-    // Record trade outcomes for pipeline self-learning
+
     this.eventBus.on('position:closed', (data) => {
       const analysis = this.memory.getAnalysis(data.mint);
       if (!analysis) return;
@@ -438,13 +663,12 @@ export class Runtime {
   }
 
   async chat(agentId: string, message: string, image?: string): Promise<string> {
-    // Auto-create agents if OAuth became available after boot
+
     if (this.agents.size === 0) {
       await this.ensureAgents();
     }
     const agent = this.agents.get(agentId);
     if (!agent) {
-      // Try first available agent as fallback
       const firstAgent = this.agents.values().next().value;
       if (firstAgent) {
         return firstAgent.chat(message, image);
@@ -454,17 +678,257 @@ export class Runtime {
     return agent.chat(message, image);
   }
 
-  /**
-   * Dynamically create agents if OAuth tokens are now available but
-   * agents weren't created at boot (because no LLM keys existed then).
-   */
-  async ensureAgents(): Promise<boolean> {
+async quickLlm(prompt: string, image?: string): Promise<string> {
+    const modelConfig = this.config.agents[0]?.model;
+    if (!modelConfig) return 'No AI model configured.';
+    try {
+      const llm = getLLMProvider(modelConfig);
+      const msg: LLMMessage = { role: 'user', content: prompt };
+      if (image) msg.image = image;
+      const resp = await llm.chat([msg], [], { maxTokens: 2000, temperature: 0.1 });
+      return resp.content || '';
+    } catch (err: any) {
+      this.logger.error('quickLlm error:', err.message);
+      return `Error: ${err.message}`;
+    }
+  }
+
+cancelChat(agentId: string): boolean {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+
+      const firstAgent = this.agents.values().next().value;
+      if (firstAgent) { firstAgent.requestCancel(); return true; }
+      return false;
+    }
+    agent.requestCancel();
+    return true;
+  }
+
+async compactChat(agentId: string): Promise<string> {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      const firstAgent = this.agents.values().next().value;
+      if (firstAgent) return firstAgent.compactNow();
+      return 'No agents available.';
+    }
+    return agent.compactNow();
+  }
+
+newChat(agentId: string): string {
+
+    for (const [, agent] of this.agents) {
+      try { agent.clearSession(); } catch {}
+    }
+    return '✅ New session started. All agent contexts cleared.';
+  }
+
+saveAllSessions(): void {
+    for (const [, agent] of this.agents) {
+      try { agent.saveSession(); } catch {}
+    }
+
+    for (const [, entry] of this.chatSessions) {
+      try { entry.runner.saveSession(); } catch {}
+    }
+  }
+
+getCheckpoints(agentId: string): Array<{ id: number; timestamp: number; messageCount: number; preview: string }> {
+    const agent = this.agents.get(agentId) || this.agents.values().next().value;
+    if (!agent) return [];
+    return agent.getCheckpoints();
+  }
+
+restoreCheckpoint(agentId: string, checkpointId: number): { ok: boolean; messageCount: number; removedMessages: number } {
+    const agent = this.agents.get(agentId) || this.agents.values().next().value;
+    if (!agent) return { ok: false, messageCount: 0, removedMessages: 0 };
+    return agent.restoreCheckpoint(checkpointId);
+  }
+
+
+createIsolatedRunner(sessionId: string, agentId?: string, skillFilter?: string[]): AgentRunner | null {
+    const templateAgentId = agentId || 'commander';
+    const agentConfig = this.config.agents.find(a => a.id === templateAgentId) || this.config.agents[0];
+    if (!agentConfig) return null;
+
+    try {
+      const privacyConfig: Partial<PrivacyConfig> = this.config.privacy || {};
+      const baseLlm = agentConfig.fallbackModels?.length
+        ? getLLMProviderWithFallback([agentConfig.model, ...agentConfig.fallbackModels])
+        : getLLMProvider(agentConfig.model);
+      const llm = new PrivacyGuard(baseLlm, privacyConfig, this.logger);
+      llm.registerWallet(this.wallet.getAddress(), 'MY_WALLET');
+
+
+      let sessionConfig = { ...agentConfig, id: sessionId };
+
+
+      if (skillFilter && skillFilter.length > 0) {
+        const restricted = agentConfig.skills.filter((s: string) => skillFilter.includes(s));
+        if (restricted.length > 0) {
+          sessionConfig = { ...sessionConfig, skills: restricted };
+          this.logger.info(`[Sessions] Skill filter applied: ${restricted.length}/${agentConfig.skills.length} skills for ${sessionId}`);
+        }
+      }
+
+      const runner = new AgentRunner({
+        config: sessionConfig,
+        llm,
+        skills: this.skillLoader,
+        eventBus: this.eventBus,
+        logger: this.logger,
+        marketState: this.marketState,
+        wallet: this.wallet,
+      });
+
+      return runner;
+    } catch (err: any) {
+      this.logger.error(`Failed to create isolated runner for session "${sessionId}": ${err.message}`);
+      return null;
+    }
+  }
+
+async sessionChat(sessionId: string, message: string, agentId?: string, image?: string, skillFilter?: string[]): Promise<string> {
+    if (!sessionId) return this.chat(agentId || 'commander', message, image);
+
+
+    if (this.agents.size === 0) await this.ensureAgents();
+
+    let entry = this.chatSessions.get(sessionId);
+    if (!entry) {
+      const runner = this.createIsolatedRunner(sessionId, agentId, skillFilter);
+      if (!runner) {
+        return 'No AI agents available. Please connect an LLM provider via Settings.';
+      }
+
+      runner.loadSession();
+      entry = { runner, agentId: agentId || 'commander', lastUsed: Date.now() };
+      this.chatSessions.set(sessionId, entry);
+      this.logger.info(`[Sessions] Created chat session: ${sessionId} (agent: ${entry.agentId})`);
+    }
+
+    entry.lastUsed = Date.now();
+    return entry.runner.chat(message, image);
+  }
+
+sessionCancel(sessionId: string): boolean {
+    const entry = this.chatSessions.get(sessionId);
+    if (entry) { entry.runner.requestCancel(); return true; }
+    return this.cancelChat('commander');
+  }
+
+sessionNew(sessionId: string): string {
+    const entry = this.chatSessions.get(sessionId);
+    if (entry) {
+      entry.runner.clearSession();
+      return 'Session cleared.';
+    }
+    return 'Session cleared.';
+  }
+
+deleteSession(sessionId: string): boolean {
+    const entry = this.chatSessions.get(sessionId);
+    if (!entry) return false;
+    try { entry.runner.clearSession(); } catch {}
+    this.chatSessions.delete(sessionId);
+    this.logger.info(`[Sessions] Deleted session: ${sessionId}`);
+    return true;
+  }
+
+async sessionCompact(sessionId: string): Promise<string> {
+    const entry = this.chatSessions.get(sessionId);
+    if (entry) return entry.runner.compactNow();
+    return 'No active session to compact.';
+  }
+
+sessionDiagnostics(sessionId: string): ReturnType<Runtime['getAgentDiagnostics']> {
+    const entry = this.chatSessions.get(sessionId);
+    if (!entry) return null;
+    const r = entry.runner;
+    return {
+      historyLength: r.getHistoryLength(),
+      compactionSummary: r.getCompactionSummary(),
+      promptMode: r.getPromptMode(),
+      efficiencyMode: r.getEfficiencyMode(),
+      maxRounds: r.getMaxRounds(),
+      contextBudget: r.getContextBudget(),
+    };
+  }
+
+sessionCheckpoints(sessionId: string): Array<{ id: number; timestamp: number; messageCount: number; preview: string }> {
+    const entry = this.chatSessions.get(sessionId);
+    if (!entry) return [];
+    return entry.runner.getCheckpoints();
+  }
+
+sessionRestoreCheckpoint(sessionId: string, checkpointId: number): { ok: boolean; messageCount: number; removedMessages: number } {
+    const entry = this.chatSessions.get(sessionId);
+    if (!entry) return { ok: false, messageCount: 0, removedMessages: 0 };
+    return entry.runner.restoreCheckpoint(checkpointId);
+  }
+
+listSessions(): Array<{ id: string; agentId: string; lastUsed: number }> {
+    const sessions: Array<{ id: string; agentId: string; lastUsed: number }> = [];
+    for (const [id, entry] of this.chatSessions) {
+      sessions.push({ id, agentId: entry.agentId, lastUsed: entry.lastUsed });
+    }
+    return sessions.sort((a, b) => b.lastUsed - a.lastUsed);
+  }
+
+private cleanupIdleSessions(): void {
+    const maxIdleMs = 2 * 60 * 60 * 1000;
+    const now = Date.now();
+    for (const [id, entry] of this.chatSessions) {
+
+      if (id.startsWith('_job_')) continue;
+      if (now - entry.lastUsed > maxIdleMs) {
+        try { entry.runner.saveSession(); } catch {}
+        this.chatSessions.delete(id);
+        this.logger.info(`[Sessions] Cleaned up idle session: ${id}`);
+      }
+    }
+  }
+
+getSessionFilterId(sessionId: string): string | null {
+    const entry = this.chatSessions.get(sessionId);
+    return entry ? sessionId : null;
+  }
+
+
+getAgentDiagnostics(agentId: string): { historyLength: number; compactionSummary: string | null; promptMode: string; efficiencyMode: string; maxRounds: number; contextBudget: { historyChars: number; maxChars: number; pct: number; maxMessages: number; compactionThreshold: number } } | null {
+    const agent = this.agents.get(agentId) || this.agents.values().next().value;
+    if (!agent) return null;
+    return {
+      historyLength: agent.getHistoryLength(),
+      compactionSummary: agent.getCompactionSummary(),
+      promptMode: agent.getPromptMode(),
+      efficiencyMode: agent.getEfficiencyMode(),
+      maxRounds: agent.getMaxRounds(),
+      contextBudget: agent.getContextBudget(),
+    };
+  }
+
+setAgentPromptMode(agentId: string, mode: 'full' | 'minimal' | 'none'): boolean {
+    const agent = this.agents.get(agentId) || this.agents.values().next().value;
+    if (!agent) return false;
+    agent.setPromptMode(mode);
+    return true;
+  }
+
+setAgentEfficiencyMode(agentId: string, mode: 'economy' | 'balanced' | 'max'): boolean {
+    const agent = this.agents.get(agentId) || this.agents.values().next().value;
+    if (!agent) return false;
+    agent.setEfficiencyMode(mode);
+    return true;
+  }
+
+async ensureAgents(): Promise<boolean> {
     if (this.agents.size > 0) return true;
     if (this.agentCreationLock) return false;
     this.agentCreationLock = true;
 
     try {
-      // Re-read config to pick up OAuth tokens that were added after boot
+
       const { loadConfig } = await import('./config');
       const freshConfig = loadConfig();
 
@@ -489,6 +953,7 @@ export class Runtime {
             eventBus: this.eventBus,
             logger: this.logger,
             marketState: this.marketState,
+            wallet: this.wallet,
           });
           this.riskManager.setAgentLimits(agentConfig.id, agentConfig.riskLimits);
           this.agents.set(agentConfig.id, runner);
@@ -498,7 +963,7 @@ export class Runtime {
         }
       }
 
-      // Give daily report generator access to LLM if we now have agents
+
       if (freshConfig.agents.length > 0 && this.dailyReport) {
         const firstCfg = freshConfig.agents[0];
         const reportLLM = firstCfg.fallbackModels?.length
@@ -538,7 +1003,7 @@ export class Runtime {
     return result;
   }
 
-  // ======= Custom Agent Management =======
+
   private get customAgentsPath() { return path.join('./data', 'custom-agents.json'); }
 
   private loadCustomAgentConfigs(): AgentConfig[] {
@@ -576,11 +1041,12 @@ export class Runtime {
         eventBus: this.eventBus,
         logger: this.logger,
         marketState: this.marketState,
+        wallet: this.wallet,
       });
       this.riskManager.setAgentLimits(agentConfig.id, agentConfig.riskLimits);
       this.agents.set(agentConfig.id, runner);
 
-      // Persist to custom agents file
+
       const saved = this.loadCustomAgentConfigs();
       saved.push(agentConfig);
       this.saveCustomAgentConfigs(saved);
@@ -598,7 +1064,7 @@ export class Runtime {
     try { runner.stop(); } catch {}
     this.agents.delete(agentId);
 
-    // Remove from custom agents persistence
+
     const saved = this.loadCustomAgentConfigs();
     const filtered = saved.filter(a => a.id !== agentId);
     this.saveCustomAgentConfigs(filtered);
@@ -625,11 +1091,12 @@ export class Runtime {
       const runner = new AgentRunner({
         config: agentConfig, llm, skills: this.skillLoader,
         eventBus: this.eventBus, logger: this.logger, marketState: this.marketState,
+        wallet: this.wallet,
       });
       this.riskManager.setAgentLimits(agentConfig.id, agentConfig.riskLimits);
       this.agents.set(agentConfig.id, runner);
 
-      // Update persistence
+
       const saved = this.loadCustomAgentConfigs();
       const idx = saved.findIndex(a => a.id === agentConfig.id);
       if (idx >= 0) saved[idx] = agentConfig; else saved.push(agentConfig);
@@ -642,8 +1109,7 @@ export class Runtime {
     }
   }
 
-  /** Restore custom agents from disk on boot */
-  restoreCustomAgents(): void {
+restoreCustomAgents(): void {
     const configs = this.loadCustomAgentConfigs();
     for (const cfg of configs) {
       if (this.agents.has(cfg.id)) continue;
@@ -659,6 +1125,7 @@ export class Runtime {
         const runner = new AgentRunner({
           config: cfg, llm, skills: this.skillLoader,
           eventBus: this.eventBus, logger: this.logger, marketState: this.marketState,
+          wallet: this.wallet,
         });
         this.riskManager.setAgentLimits(cfg.id, cfg.riskLimits);
         this.agents.set(cfg.id, runner);
@@ -745,8 +1212,16 @@ export class Runtime {
     return this.autoApprove;
   }
 
+  getJobManager(): JobManager {
+    return this.jobManager;
+  }
+
   setAutoApproveLevel(level: AutoApproveLevel): void {
     this.autoApprove.setLevel(level);
+
+    for (const [, runner] of this.agents) {
+      runner.setAutoApproveLevel(level as any);
+    }
   }
 
   setPrivacyConfig(config: Partial<PrivacyConfig>): void {
@@ -765,17 +1240,16 @@ export class Runtime {
     if (rpc.solana) this.config.rpc.solana = rpc.solana;
     if (rpc.helius !== undefined) {
       this.config.rpc.helius = rpc.helius || undefined;
-      // Extract API key from Helius URL
+
       const keyMatch = rpc.helius?.match(/api-key=([^&]+)/);
       this.config.rpc.heliusApiKey = keyMatch ? keyMatch[1] : undefined;
     }
 
     const newSolanaRpc = this.config.rpc.solana;
     const newHeliusKey = this.config.rpc.heliusApiKey || '';
-    const newHeliusRpc = newHeliusKey ? `https://mainnet.helius-rpc.com/?api-key=${newHeliusKey}` : '';
+    const newHeliusRpc = newHeliusKey ? `https://mainnet.helius-rpc.com/?api-key=${newHeliusKey}` : undefined;
 
-    // Hot-reload ALL skills that use RPC
-    const rpcSkills = ['token-analyzer', 'token-security', 'curve-analyzer', 'holder-intelligence', 'wallet-tracker'];
+    const rpcSkills = ['token-analyzer', 'token-security', 'curve-analyzer', 'holder-intelligence', 'wallet-tracker', 'shit-trader'];
     for (const skillName of rpcSkills) {
       const skill = this.skillLoader.getSkill(skillName);
       if (skill) {
@@ -784,16 +1258,25 @@ export class Runtime {
       }
     }
 
-    // Update blockchain skill
     const blockchain = this.skillLoader.getSkill('blockchain');
     if (blockchain && (blockchain as any).updateRpc) {
       (blockchain as any).updateRpc(newSolanaRpc, newHeliusRpc);
     }
 
-    // Update wallet connection
+    const shitTrader = this.skillLoader.getSkill('shit-trader');
+    if (shitTrader && (shitTrader as any).updateRpc) {
+      (shitTrader as any).updateRpc(newSolanaRpc);
+    }
+
     this.wallet.updateRpc(newSolanaRpc);
 
     this.logger.info(`RPC config updated: solana=${newSolanaRpc.substring(0, 40)}...`);
+
+
+    try {
+      const rpcPath = path.join(process.cwd(), 'data', 'rpc-config.json');
+      fs.writeFileSync(rpcPath, JSON.stringify({ solana: this.config.rpc.solana, helius: this.config.rpc.helius || '' }, null, 2));
+    } catch {}
   }
 
   getModelConfig(): Record<string, { provider: string; model: string }> {
@@ -810,16 +1293,8 @@ export class Runtime {
       model: modelConfig.model,
     };
 
-    // Add provider-specific fields
-    const providerEnvMap: Record<string, string> = {
-      openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY',
-      groq: 'GROQ_API_KEY', deepseek: 'DEEPSEEK_API_KEY',
-      mistral: 'MISTRAL_API_KEY', openrouter: 'OPENROUTER_API_KEY',
-      google: 'GOOGLE_API_KEY', xai: 'XAI_API_KEY', cursor: 'CURSOR_API_KEY',
-      cerebras: 'CEREBRAS_API_KEY', together: 'TOGETHER_API_KEY',
-      fireworks: 'FIREWORKS_API_KEY', sambanova: 'SAMBANOVA_API_KEY',
-    };
-    const envKey = providerEnvMap[mc.provider];
+
+    const envKey = Runtime.PROVIDER_ENV_MAP[mc.provider];
     if (envKey && process.env[envKey]) {
       mc.apiKey = process.env[envKey];
     }
@@ -830,7 +1305,7 @@ export class Runtime {
       mc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
     }
 
-    // Create new LLM provider and hot-swap on all agents
+
     const privacyConfig = this.config.privacy || {};
     for (const [id, runner] of this.agents) {
       try {
@@ -839,7 +1314,7 @@ export class Runtime {
         llm.registerWallet(this.wallet.getAddress(), 'MY_WALLET');
         runner.setLLM(llm);
 
-        // Update config on the agent
+
         const agentCfg = this.config.agents.find(a => a.id === id);
         if (agentCfg) agentCfg.model = mc;
 
@@ -849,7 +1324,7 @@ export class Runtime {
       }
     }
 
-    // Persist model config to disk
+
     try {
       fs.mkdirSync(path.dirname(this.modelConfigPath), { recursive: true });
       fs.writeFileSync(this.modelConfigPath, JSON.stringify({ provider: mc.provider, model: mc.model }, null, 2), 'utf-8');
@@ -859,11 +1334,7 @@ export class Runtime {
     }
   }
 
-  // =====================================================
-  // API Key Management (encrypted persistent storage)
-  // =====================================================
 
-  // Provider name → env variable mapping
   private static readonly PROVIDER_ENV_MAP: Record<string, string> = {
     openai: 'OPENAI_API_KEY',
     anthropic: 'ANTHROPIC_API_KEY',
@@ -878,8 +1349,8 @@ export class Runtime {
     fireworks: 'FIREWORKS_API_KEY',
     sambanova: 'SAMBANOVA_API_KEY',
     ollama: 'OLLAMA_BASE_URL',
-    cursor: 'CURSOR_API_KEY',
-    cursor_repository_url: 'CURSOR_REPOSITORY_URL',
+    houdini_key: 'HOUDINI_API_KEY',
+    houdini_secret: 'HOUDINI_API_SECRET',
   };
 
   getApiKeys(): Record<string, string> {
@@ -887,14 +1358,16 @@ export class Runtime {
     for (const [provider, envKey] of Object.entries(Runtime.PROVIDER_ENV_MAP)) {
       const val = process.env[envKey];
       if (val) {
-        // Mask API keys, show Ollama URL as-is
-        result[provider] = (provider === 'ollama' || provider === 'cursor_repository_url') ? val : '***configured***';
+
+        result[provider] = provider === 'ollama' ? val : '***configured***';
       }
     }
     return result;
   }
 
   setApiKeys(keys: Record<string, string>): void {
+    const updatedProviders = new Set<string>();
+
     for (const [provider, value] of Object.entries(keys)) {
       const envKey = Runtime.PROVIDER_ENV_MAP[provider];
       if (!envKey) continue;
@@ -902,15 +1375,28 @@ export class Runtime {
       const trimmed = typeof value === 'string' ? value.trim() : '';
       if (trimmed && trimmed !== '***configured***') {
         process.env[envKey] = trimmed;
+        updatedProviders.add(provider);
         this.logger.info(`API key set for ${provider}`);
       } else if (trimmed === '') {
-        // Empty string = remove key
         delete process.env[envKey];
         this.logger.info(`API key removed for ${provider}`);
       }
-      // '***configured***' = no change (user didn't modify)
     }
     this.saveApiKeysToDisk();
+
+
+    if (updatedProviders.size > 0 && this.agents.size > 0) {
+      try {
+        const currentModels = this.getAgentModels();
+        const firstModel = Object.values(currentModels)[0];
+        if (firstModel && updatedProviders.has(firstModel.provider)) {
+          this.setModelConfig(firstModel);
+          this.logger.info(`Re-applied model config after API key update for ${firstModel.provider}`);
+        }
+      } catch (err: any) {
+        this.logger.warn('Failed to re-apply model config after key update: ' + err.message);
+      }
+    }
   }
 
   private loadApiKeysFromDisk(): void {
@@ -920,20 +1406,20 @@ export class Runtime {
       const decrypted = this.decryptData(encrypted);
       const keys = JSON.parse(decrypted) as Record<string, string>;
       for (const [provider, value] of Object.entries(keys)) {
-        // Restore Twitter cookies
+
         if (provider === '_twitter_cookies') {
           if (value && !process.env.TWITTER_COOKIES) process.env.TWITTER_COOKIES = value;
           continue;
         }
         const envKey = Runtime.PROVIDER_ENV_MAP[provider];
         if (envKey && value && !process.env[envKey]) {
-          // Only set if not already in .env (env takes precedence)
+
           process.env[envKey] = value;
         }
       }
       this.logger.debug(`Loaded ${Object.keys(keys).length} API key(s) from disk`);
     } catch {
-      // Corrupted or missing, ignore
+
     }
   }
 
@@ -947,7 +1433,7 @@ export class Runtime {
         const val = process.env[envKey];
         if (val) keys[provider] = val;
       }
-      // Include Twitter cookies
+
       if (process.env.TWITTER_COOKIES) keys['_twitter_cookies'] = process.env.TWITTER_COOKIES;
       const json = JSON.stringify(keys);
       const encrypted = this.encryptData(json);
@@ -983,9 +1469,6 @@ export class Runtime {
     return this.browserService;
   }
 
-  // =====================================================
-  // Twitter Cookies (for authenticated profile scraping)
-  // =====================================================
 
   getTwitterCookies(): string {
     return process.env.TWITTER_COOKIES || '';
@@ -1006,11 +1489,17 @@ export class Runtime {
   async shutdown(): Promise<void> {
     this.logger.info('Shutting down...');
 
+
+    for (const [id, agent] of this.agents) {
+      try { agent.saveSession(); } catch {}
+    }
+
     if (this.session) {
       await this.stopSession();
     }
 
     this.scheduler.stopAll();
+    this.jobManager.stop();
     await this.skillLoader.shutdownAll();
     await this.browserService.shutdown();
     this.eventBus.removeAllListeners();
@@ -1020,7 +1509,12 @@ export class Runtime {
   }
 
   private registerScheduledTasks(): void {
-    // Health check every 2 minutes
+
+    this.scheduler.register('session-autosave', 'Session Auto-Save', async () => {
+      this.saveAllSessions();
+    }, 5 * 60_000);
+
+
     this.scheduler.register('health-check', 'System Health Check', async () => {
       const agents = Array.from(this.agents.values()).map(a => a.getState());
       this.eventBus.emit('system:health', {
@@ -1028,9 +1522,9 @@ export class Runtime {
         agents,
         positions: [],
       });
-    }, 120_000);
+    }, 3 * 60 * 60_000);
 
-    // Snapshot cleanup daily
+
     this.scheduler.register('snapshot-cleanup', 'Snapshot Cleanup', async () => {
       const removed = this.memory.cleanOldSnapshots();
       if (removed > 0) {
@@ -1038,7 +1532,7 @@ export class Runtime {
       }
     }, 86_400_000);
 
-    // Wallet balance check every 5 minutes
+
     this.scheduler.register('balance-check', 'Balance Check', async () => {
       try {
         if (!this.wallet.hasWallet()) return;
@@ -1048,28 +1542,7 @@ export class Runtime {
       } catch {}
     }, 300_000);
 
-    // Pipeline self-learning every 30 minutes
-    this.scheduler.register('pipeline-learning', 'Pipeline Self-Learning', async () => {
-      const stats = this.memory.getLearningStats(7);
-      if (stats.totalTrades < 5) return; // Need minimum data
 
-      // Emit to pipeline so it can adjust weights
-      this.eventBus.emit('pipeline:learn', {
-        winSignals: stats.winSignals,
-        loseSignals: stats.loseSignals,
-        winRate: stats.winRate,
-        totalTrades: stats.totalTrades,
-      });
-
-      this.logger.info(
-        `Pipeline learning: ${stats.totalTrades} trades, ` +
-        `${(stats.winRate * 100).toFixed(0)}% win rate, ` +
-        `reinforce=[${stats.winSignals.join(',')}], ` +
-        `penalize=[${stats.loseSignals.join(',')}]`
-      );
-    }, 30 * 60_000);
-
-    // Daily strategic report every 24 hours
     this.scheduler.register('daily-report', 'Daily Strategic Report', async () => {
       try {
         const report = await this.dailyReport.generateReport();
@@ -1084,7 +1557,7 @@ export class Runtime {
       }
     }, 24 * 60 * 60_000);
 
-    // Database backup every 6 hours
+
     this.scheduler.register('db-backup', 'Database Backup', async () => {
       try {
         this.backupManager.backup();

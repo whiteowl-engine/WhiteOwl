@@ -1,8 +1,9 @@
-import { Skill, SkillManifest, SkillContext, TokenInfo, TokenAnalysis, HolderData, LoggerInterface, EventBusInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, TokenInfo, TokenAnalysis, HolderData, LoggerInterface, EventBusInterface } from '../types.ts';
+import { InsightXClient, RpcHolderAnalyzer, detectBotPattern, detectBotPatternFromHolders, computeDistributionMetrics } from './insightx.ts';
+import { axiomResolvePair, axiomTokenInfo, axiomTokenAnalysis, axiomKolTxns, axiomSniperTxns } from './axiom-api.ts';
 
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com';
 
-// Known DEX / AMM program IDs — accounts OWNED by these programs are liquidity pools
 const DEX_PROGRAM_IDS = new Map<string, string>([
   ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  'pump.fun Bonding Curve'],
   ['PumpFunAMMVyBmGAKgG3ksqyzVPBaQ5MqMk5MtKoFPu',  'pump.fun AMM'],
@@ -21,13 +22,11 @@ const DEX_PROGRAM_IDS = new Map<string, string>([
   ['opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EQMQo8',   'Openbook v2'],
 ]);
 
-// Known pool authority / vault addresses (direct match)
 const KNOWN_POOL_AUTHORITIES = new Set([
-  '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', // Raydium Authority V4
-  'GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ', // Meteora Vault Authority
+  '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
+  'GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ',
 ]);
 
-// Legacy: direct match set for backward compat during owner resolution
 const POOL_PROGRAMS = new Set([...DEX_PROGRAM_IDS.keys(), ...KNOWN_POOL_AUTHORITIES]);
 
 const BURN_ADDRESSES = new Set([
@@ -37,10 +36,9 @@ const BURN_ADDRESSES = new Set([
   '1111111111111111111111111111111111111111111',
 ]);
 
-// Token Program IDs — ATA accounts are always owned by one of these
 const TOKEN_PROGRAMS = new Set([
-  'TokenkegQvGj58wGBgs73xPopGXNqirbyS2qb9hXV',      // Token Program
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',    // Token-2022
+  'TokenkegQvGj58wGBgs73xPopGXNqirbyS2qb9hXV',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
 ]);
 
 export class TokenAnalyzerSkill implements Skill {
@@ -150,7 +148,7 @@ export class TokenAnalyzerSkill implements Skill {
       },
       {
         name: 'rate_project',
-        description: 'Generate a comprehensive PROJECT RATING / SHIELD (щиток) — a holistic assessment combining on-chain data, social presence, dev reputation, community signals, website quality, and narrative fit. Returns a structured verdict with category scores, NOT just raw stats.',
+        description: 'Generate a comprehensive PROJECT RATING / SHIELD — a holistic assessment combining on-chain data, social presence, dev reputation, community signals, website quality, and narrative fit. Returns a structured verdict with category scores, NOT just raw stats.',
         parameters: {
           type: 'object',
           properties: {
@@ -183,6 +181,15 @@ export class TokenAnalyzerSkill implements Skill {
   private heliusKey: string = '';
   private solanaRpc: string = '';
   private metadataCache = new Map<string, { data: TokenInfo; expiresAt: number }>();
+  private _sessionHash: string = '';
+
+  private getSessionHash(): string {
+    if (!this._sessionHash) {
+
+      this._sessionHash = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+    return this._sessionHash;
+  }
 
   async initialize(ctx: SkillContext): Promise<void> {
     this.ctx = ctx;
@@ -227,7 +234,7 @@ export class TokenAnalyzerSkill implements Skill {
     let score = 50;
     let rugScore = 50;
 
-    // Use cached tokenInfo if available, otherwise fetch fresh
+
     let tokenInfo = cachedTokenInfo || await this.fetchTokenMetadata(mint);
     if (!tokenInfo) {
       tokenInfo = this.ctx.memory.getToken(mint);
@@ -245,7 +252,7 @@ export class TokenAnalyzerSkill implements Skill {
       };
     }
 
-    // Social presence check
+
     if (tokenInfo.twitter) {
       score += 10;
       signals.push('Has Twitter');
@@ -264,14 +271,33 @@ export class TokenAnalyzerSkill implements Skill {
       signals.push('Has Website');
     }
 
-    // Run dev wallet + holder analysis in PARALLEL for speed
-    // skipHolders=true when called from rateProject (GMGN provides holder metrics, saves 3 RPC calls)
-    const [devInfo, holders] = await Promise.all([
+
+    const axiomPairP = axiomResolvePair(mint).catch(() => null);
+    const [devInfo, holders, axiomPair] = await Promise.all([
       tokenInfo.dev ? this.checkDevWallet(tokenInfo.dev, true) : Promise.resolve(null),
       skipHolders ? Promise.resolve(null) : this.checkHolders(mint),
+      axiomPairP,
     ]);
 
-    // Dev wallet analysis
+
+    let axiomInfo: any = null;
+    let axiomAnalysis: any = null;
+    let axiomKols: any[] | null = null;
+    let axiomSnipers: any[] | null = null;
+    if (axiomPair) {
+      const [ai, aa, ak, as_] = await Promise.all([
+        axiomTokenInfo(axiomPair).catch(() => null),
+        tokenInfo.dev && tokenInfo.symbol ? axiomTokenAnalysis(axiomPair, tokenInfo.dev, tokenInfo.symbol).catch(() => null) : Promise.resolve(null),
+        axiomKolTxns(axiomPair).catch(() => null),
+        axiomSniperTxns(axiomPair).catch(() => null),
+      ]);
+      axiomInfo = ai;
+      axiomAnalysis = aa;
+      axiomKols = ak;
+      axiomSnipers = as_;
+    }
+
+
     if (tokenInfo.dev && devInfo) {
       if (this.ctx.memory.isKnownRug(tokenInfo.dev)) {
         rugScore = 95;
@@ -294,7 +320,7 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Holder analysis
+
     if (holders && !('error' in holders)) {
       if (holders.top10Percent > 80) {
         score -= 20;
@@ -317,7 +343,133 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Bonding curve position
+
+    try {
+      const insightxKey = process.env.INSIGHTX_API_KEY || '';
+      if (insightxKey) {
+
+        const ixClient = new InsightXClient(insightxKey, this.logger);
+        const [ixOverview, ixClusters, ixSnipers, ixBundlers] = await Promise.all([
+          ixClient.getOverview(mint),
+          ixClient.getClusters(mint),
+          ixClient.getSnipers(mint),
+          ixClient.getBundlers(mint),
+        ]);
+
+        if (ixOverview) {
+          if (ixOverview.cluster_pct > 40) {
+            score -= 15;
+            rugScore += 15;
+            signals.push(`InsightX: ${ixOverview.cluster_pct}% in clusters (high)`);
+          } else if (ixOverview.cluster_pct > 20) {
+            score -= 8;
+            rugScore += 8;
+            signals.push(`InsightX: ${ixOverview.cluster_pct}% in clusters`);
+          }
+          if (ixOverview.bundlers_pct > 8) {
+            score -= 10;
+            rugScore += 10;
+            signals.push(`InsightX: ${ixOverview.bundlers_pct}% bundlers`);
+          }
+          if (ixOverview.snipers_pct > 12) {
+            score -= 8;
+            rugScore += 8;
+            signals.push(`InsightX: ${ixOverview.snipers_pct}% snipers`);
+          }
+          if (ixOverview.insiders_pct > 8) {
+            score -= 10;
+            rugScore += 10;
+            signals.push(`InsightX: ${ixOverview.insiders_pct}% insiders`);
+          }
+        }
+
+        const botPattern = detectBotPattern(ixClusters, ixSnipers, ixBundlers);
+        if (botPattern.detected) {
+          const penalty = Math.min(20, Math.round(botPattern.confidence * 0.2));
+          score -= penalty;
+          rugScore += Math.round(penalty * 0.7);
+          signals.push(`🤖 Bot/MM: ${botPattern.totalBotWallets} wallets hold ${botPattern.totalBotPct}% uniformly (${botPattern.confidence}% conf)`);
+        }
+      } else {
+
+        const rpcUrl = this.heliusKey ? `${HELIUS_RPC}/?api-key=${this.heliusKey}` : this.solanaRpc;
+        const rpcAnalyzer = new RpcHolderAnalyzer(rpcUrl, this.logger);
+        const rpcHolders = await rpcAnalyzer.getHolders(mint);
+
+        if (rpcHolders.length >= 5) {
+
+          const rpcClusters = rpcAnalyzer.findClusters(rpcHolders as any);
+          if (rpcClusters.total_cluster_pct > 40) {
+            score -= 12;
+            rugScore += 12;
+            signals.push(`${rpcClusters.total_cluster_pct}% in ${rpcClusters.clusters.length} cluster(s)`);
+          } else if (rpcClusters.total_cluster_pct > 20) {
+            score -= 6;
+            rugScore += 6;
+            signals.push(`${rpcClusters.total_cluster_pct}% in clusters`);
+          }
+
+
+          const botPattern = detectBotPatternFromHolders(rpcHolders);
+          if (botPattern.detected) {
+            const penalty = Math.min(20, Math.round(botPattern.confidence * 0.2));
+            score -= penalty;
+            rugScore += Math.round(penalty * 0.7);
+            signals.push(`🤖 Bot/MM: ${botPattern.totalBotWallets} wallets hold ${botPattern.totalBotPct}% uniformly (${botPattern.confidence}% conf)`);
+          }
+        }
+      }
+    } catch (ixErr: any) {
+
+      this.logger.warn(`Holder enrichment failed for ${mint}: ${ixErr.message}`);
+    }
+
+
+    if (axiomInfo) {
+      if (axiomInfo.insidersHoldPercent > 20) {
+        score -= 10;
+        rugScore += 10;
+        signals.push(`Axiom: insiders hold ${axiomInfo.insidersHoldPercent.toFixed(1)}%`);
+      }
+      if (axiomInfo.bundlersHoldPercent > 15) {
+        score -= 8;
+        rugScore += 8;
+        signals.push(`Axiom: bundlers hold ${axiomInfo.bundlersHoldPercent.toFixed(1)}%`);
+      }
+      if (axiomInfo.snipersHoldPercent > 15) {
+        score -= 5;
+        rugScore += 5;
+        signals.push(`Axiom: snipers hold ${axiomInfo.snipersHoldPercent.toFixed(1)}%`);
+      }
+      if (axiomInfo.dexPaid) {
+        score += 3;
+        signals.push('Axiom: dexPaid ✓');
+      }
+      if (axiomInfo.numHolders > 0) {
+        signals.push(`Axiom: ${axiomInfo.numHolders} holders, top10=${axiomInfo.top10HoldersPercent?.toFixed(1)}%`);
+      }
+    }
+    if (axiomAnalysis) {
+      if (axiomAnalysis.creatorRugCount > 2) {
+        score -= 20;
+        rugScore += 25;
+        signals.push(`Axiom: dev rugged ${axiomAnalysis.creatorRugCount} times! Risk: ${axiomAnalysis.creatorRiskLevel}`);
+      } else if (axiomAnalysis.creatorRugCount > 0) {
+        score -= 10;
+        rugScore += 10;
+        signals.push(`Axiom: dev rugged ${axiomAnalysis.creatorRugCount}x, risk=${axiomAnalysis.creatorRiskLevel}`);
+      }
+    }
+    if (axiomKols && axiomKols.length > 0) {
+      score += Math.min(10, axiomKols.length * 3);
+      signals.push(`Axiom: ${axiomKols.length} KOL(s) traded`);
+    }
+    if (axiomSnipers && axiomSnipers.length > 5) {
+      score -= 5;
+      signals.push(`Axiom: ${axiomSnipers.length} snipers at launch`);
+    }
+
+
     if (tokenInfo.bondingCurveProgress < 10) {
       score += 5;
       signals.push(`Early bonding: ${tokenInfo.bondingCurveProgress.toFixed(1)}%`);
@@ -326,7 +478,7 @@ export class TokenAnalyzerSkill implements Skill {
       signals.push('Near graduation — higher risk entry');
     }
 
-    // Pattern uniqueness check — penalize repeated patterns
+
     const patternCheck = this.checkPatternUniqueness(mint, tokenInfo, null);
     if (patternCheck.penalty > 0) {
       score -= patternCheck.penalty;
@@ -339,7 +491,7 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Clamp scores
+
     score = Math.max(0, Math.min(100, score));
     rugScore = Math.max(0, Math.min(100, rugScore));
 
@@ -362,7 +514,7 @@ export class TokenAnalyzerSkill implements Skill {
 
     this.ctx.memory.storeAnalysis(analysis);
 
-    // Record pattern fingerprint for the uniqualizer (self-learning)
+
     try {
       this.ctx.memory.storeTokenPattern({
         mint,
@@ -377,9 +529,9 @@ export class TokenAnalyzerSkill implements Skill {
         score,
         rugScore,
       });
-    } catch { /* non-critical */ }
+    } catch {  }
 
-    // Enrich with creator info + top holders + GMGN market data in parallel
+
     let creatorInfo: any = undefined;
     let topHoldersInfo: any = undefined;
     let gmgnMarketData: any = undefined;
@@ -388,7 +540,7 @@ export class TokenAnalyzerSkill implements Skill {
     if (tokenInfo.dev) {
       enrichPromises.push((async () => {
         try {
-          const creatorRes = await fetch(`https://frontend-api-v3.pump.fun/coins-v2/user-created-coins/${tokenInfo.dev}?offset=0&limit=50&includeNsfw=true`, {
+                    const creatorRes = await fetch(`https://frontend-api.pump.fun/coins/user-created-coins/${tokenInfo.dev}`, {
             headers: { 'Origin': 'https://pump.fun', 'Referer': 'https://pump.fun/' },
           });
           if (creatorRes.ok) {
@@ -411,14 +563,14 @@ export class TokenAnalyzerSkill implements Skill {
                 : '0%',
             };
           }
-        } catch { /* non-critical */ }
+        } catch {  }
       })());
     }
 
-    // Top holders from advanced-api
+
     enrichPromises.push((async () => {
       try {
-        const holdersRes = await fetch(`https://advanced-api-v2.pump.fun/coins/top-holders-and-sol-balance/${mint}`, {
+                const holdersRes = await fetch(`https://frontend-api.pump.fun/coins/${mint}/top-holders`, {
           headers: { 'Origin': 'https://pump.fun', 'Referer': 'https://pump.fun/' },
         });
         if (holdersRes.ok) {
@@ -432,10 +584,9 @@ export class TokenAnalyzerSkill implements Skill {
             })),
           };
         }
-      } catch { /* non-critical */ }
+      } catch {  }
     })());
 
-    // GMGN market data (volume, price changes)
     enrichPromises.push((async () => {
       try {
         const gmgn = await this.fetchGmgnSecurity(mint);
@@ -452,7 +603,7 @@ export class TokenAnalyzerSkill implements Skill {
             freshWalletCount: gmgn.freshWalletCount ?? null,
           };
         }
-      } catch { /* non-critical */ }
+      } catch {  }
     })());
 
     await Promise.allSettled(enrichPromises);
@@ -476,7 +627,7 @@ export class TokenAnalyzerSkill implements Skill {
 
     return {
       ...analysis,
-      // Token metadata
+
       name: tokenInfo.name,
       symbol: tokenInfo.symbol,
       description: tokenInfo.description,
@@ -485,7 +636,7 @@ export class TokenAnalyzerSkill implements Skill {
       marketCap: tokenInfo.marketCap,
       bondingCurveProgress: tokenInfo.bondingCurveProgress,
       price: (tokenInfo as any).price || 0,
-      // On-chain curve data
+
       curveData: (tokenInfo as any)._extra ? {
         realSolReserves: (tokenInfo as any)._extra.realSolReserves,
         virtualSolReserves: (tokenInfo as any)._extra.virtualSolReserves,
@@ -494,28 +645,27 @@ export class TokenAnalyzerSkill implements Skill {
         replyCount: (tokenInfo as any)._extra.replyCount,
         athMarketCap: (tokenInfo as any)._extra.athMarketCap || null,
       } : undefined,
-      // Social links
+
       twitter: tokenInfo.twitter || null,
       telegram: tokenInfo.telegram || null,
       website: tokenInfo.website || null,
-      // Enrichments
+
       creatorInfo,
       topHoldersInfo,
-      // GMGN market data
+
       gmgnMarketData,
-      // Holder on-chain data
+
       holderAnalysis: holders && !('error' in holders) ? holders : undefined,
     } as any;
   }
 
   private async checkHolders(mint: string): Promise<HolderData | { error: string }> {
     try {
-      // Try Helius enriched data first
+
       if (this.heliusKey) {
         return await this.getHoldersViaHelius(mint);
       }
 
-      // Fallback: basic RPC call
       return await this.getHoldersViaRpc(mint);
     } catch (err: any) {
       return { error: err.message };
@@ -531,17 +681,10 @@ export class TokenAnalyzerSkill implements Skill {
     return this.getHoldersResolved(this.solanaRpc, mint);
   }
 
-  /**
-   * Proper holder analysis:
-   * 1. getTokenLargestAccounts → returns ATA addresses (NOT wallets!)
-   * 2. getMultipleAccounts(jsonParsed) → resolve ATAs to owner wallets
-   * 3. Classify each: bonding_curve / liquidity_pool / burn / real_holder
-   * 4. Calculate metrics on CIRCULATING supply only
-   */
-  private async getHoldersResolved(rpcUrl: string, mint: string): Promise<HolderData> {
-    // Step 1: Get top token accounts (ATAs)
+private async getHoldersResolved(rpcUrl: string, mint: string): Promise<HolderData> {
+
     const res = await fetch(rpcUrl, {
-      method: 'POST',
+            method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 1,
@@ -558,14 +701,14 @@ export class TokenAnalyzerSkill implements Skill {
 
     const totalSupply = accounts.reduce((s: number, a: any) => s + Number(a.amount || 0), 0);
 
-    // Step 2: Resolve ATAs → owner wallets
+
     const ataAddresses = accounts.map((a: any) => a.address);
-    let ownerMap = new Map<string, string>(); // ATA → owner wallet
-    let programMap = new Map<string, string>(); // ATA → owner program
+    let ownerMap = new Map<string, string>();
+    let programMap = new Map<string, string>();
 
     try {
       const resolveRes = await fetch(rpcUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 2,
@@ -588,10 +731,10 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
     } catch {
-      // If resolution fails, fall back to basic analysis
+
     }
 
-    // Step 3: First pass — direct match against known programs/authorities
+
     const token = this.ctx.memory.getToken(mint);
     const devAddress = token?.dev || '';
 
@@ -604,7 +747,7 @@ export class TokenAnalyzerSkill implements Skill {
       const amount = Number(acct.amount || 0);
       const owner = ownerMap.get(ata) || ata;
 
-      // Direct match: owner is a known pool program or authority
+
       if (POOL_PROGRAMS.has(owner)) {
         const poolName = DEX_PROGRAM_IDS.get(owner) || 'LP Pool';
         lpPools.push({ name: poolName, amount });
@@ -617,18 +760,17 @@ export class TokenAnalyzerSkill implements Skill {
       pendingClassify.push({ ata, owner, amount });
     }
 
-    // Step 3b: Second lookup — resolve owner wallets to find which PROGRAM owns them.
-    // This catches LP PDAs: the owner wallet is a PDA, and that PDA's owner is a DEX program.
-    const ownerProgramMap = new Map<string, string>(); // owner wallet → program that owns it
+
+    const ownerProgramMap = new Map<string, string>();
     const uniqueOwners = [...new Set(pendingClassify.map(h => h.owner))];
 
     if (uniqueOwners.length > 0) {
       try {
-        // Batch in chunks of 100
+
         for (let i = 0; i < uniqueOwners.length; i += 100) {
           const batch = uniqueOwners.slice(i, i + 100);
           const ownerRes = await fetch(rpcUrl, {
-            method: 'POST',
+                        method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               jsonrpc: '2.0', id: 3,
@@ -646,34 +788,33 @@ export class TokenAnalyzerSkill implements Skill {
           }
         }
       } catch {
-        // If second lookup fails, continue with what we have
+
       }
     }
 
-    // Step 3c: Classify remaining holders using the owner-program map
+
     const realHolders: { ata: string; owner: string; amount: number }[] = [];
 
     for (const item of pendingClassify) {
       const ownerProgram = ownerProgramMap.get(item.owner) || '';
 
-      // If the owner wallet is owned by a known DEX program → it's an LP PDA
+
       if (DEX_PROGRAM_IDS.has(ownerProgram)) {
         const poolName = DEX_PROGRAM_IDS.get(ownerProgram)!;
         lpPools.push({ name: poolName, amount: item.amount });
         continue;
       }
 
-      // If the owner wallet is owned by a known pool authority
+
       if (KNOWN_POOL_AUTHORITIES.has(item.owner) || KNOWN_POOL_AUTHORITIES.has(ownerProgram)) {
         lpPools.push({ name: 'LP Pool', amount: item.amount });
         continue;
       }
 
-      // If ownerProgram is NOT system program or token program, it's likely a protocol PDA
-      // System program = 11111111111111111111111111111111 (regular wallets)
+
       const isRegularWallet = ownerProgram === '11111111111111111111111111111111' || ownerProgram === '';
       if (!isRegularWallet && !TOKEN_PROGRAMS.has(ownerProgram) && item.amount > 0) {
-        // Unknown program owns this wallet — likely a pool or protocol
+
         lpPools.push({ name: `Unknown LP (${ownerProgram.slice(0, 8)}…)`, amount: item.amount });
         continue;
       }
@@ -681,7 +822,7 @@ export class TokenAnalyzerSkill implements Skill {
       realHolders.push(item);
     }
 
-    // Step 4: Calculate metrics on CIRCULATING supply
+
     const poolAmount = lpPools.reduce((s, p) => s + p.amount, 0);
     const circulatingSupply = totalSupply - poolAmount - burnedAmount;
     const sorted = realHolders.sort((a, b) => b.amount - a.amount);
@@ -689,10 +830,10 @@ export class TokenAnalyzerSkill implements Skill {
     const top10Amount = sorted.slice(0, 10).reduce((s, a) => s + a.amount, 0);
     const top20Amount = sorted.slice(0, 20).reduce((s, a) => s + a.amount, 0);
 
-    // Dev holding
+
     const devHolding = sorted.filter(h => h.owner === devAddress).reduce((s, h) => s + h.amount, 0);
 
-    // Aggregate LP pools by name
+
     const lpByName = new Map<string, number>();
     for (const lp of lpPools) {
       lpByName.set(lp.name, (lpByName.get(lp.name) || 0) + lp.amount);
@@ -702,7 +843,7 @@ export class TokenAnalyzerSkill implements Skill {
       percent: totalSupply > 0 ? (amt / totalSupply) * 100 : 0,
     }));
 
-    // Top holders with labels
+
     const topHoldersList = sorted.slice(0, 10).map(h => {
       const pct = circulatingSupply > 0 ? (h.amount / circulatingSupply) * 100 : 0;
       let label: string | undefined;
@@ -737,8 +878,8 @@ export class TokenAnalyzerSkill implements Skill {
     txCount: number;
     isKnownRug: boolean;
   }> {
-    // Auto-resolve: if this looks like a token mint, fetch the creator wallet from pump.fun
-    // Skip when called from analyzeToken/rateProject where dev address is already known
+
+
     let resolvedFrom: string | undefined;
     if (!skipResolve) {
       try {
@@ -747,21 +888,21 @@ export class TokenAnalyzerSkill implements Skill {
           resolvedFrom = address;
           address = tokenInfo.dev;
         }
-      } catch { /* not a token mint — treat as wallet */ }
+      } catch {  }
     }
 
     const rpcUrl = this.heliusKey ? `${HELIUS_RPC}/?api-key=${this.heliusKey}` : this.solanaRpc;
 
     try {
-      // First batch: getBalance + first page of signatures
+
       const [balRes, sigRes] = await Promise.all([
         fetch(rpcUrl, {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }),
         }),
         fetch(rpcUrl, {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'getSignaturesForAddress', params: [address, { limit: 1000 }] }),
         }),
@@ -771,13 +912,13 @@ export class TokenAnalyzerSkill implements Skill {
       const balanceSol = (balData.result?.value || 0) / 1e9;
       let sigs: any[] = sigData.result || [];
 
-      // Paginate to get total tx count (up to 5000 max to avoid excessive RPC calls)
+
       const MAX_TX_PAGES = 4;
       for (let page = 0; page < MAX_TX_PAGES && sigs.length > 0 && sigs.length % 1000 === 0; page++) {
         const lastSig = sigs[sigs.length - 1].signature;
         try {
           const nextRes = await fetch(rpcUrl, {
-            method: 'POST',
+                        method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jsonrpc: '2.0', id: 3 + page, method: 'getSignaturesForAddress', params: [address, { limit: 1000, before: lastSig }] }),
           });
@@ -790,7 +931,7 @@ export class TokenAnalyzerSkill implements Skill {
 
       const txCount = sigs.length;
 
-      // Use the oldest fetched signature for age estimate
+
       const oldestBlock = sigs.length > 0 ? sigs[sigs.length - 1].blockTime : 0;
       const accountAge = oldestBlock > 0
         ? (Date.now() / 1000 - oldestBlock) / 86400
@@ -829,8 +970,8 @@ export class TokenAnalyzerSkill implements Skill {
     if (sortedAccounts.length < 5) return false;
 
     const amounts = sortedAccounts.slice(0, 20).map((a) => Number(a.amount));
-    // Look for consecutive wallets with nearly identical amounts (>99% match)
-    // This is a stronger signal than just any similar pairs
+
+
     let consecutiveSimilar = 0;
     let maxConsecutive = 0;
     let similarPairs = 0;
@@ -845,7 +986,7 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Also check all pairs with strict ratio (>0.99)
+
     for (let i = 0; i < amounts.length - 1; i++) {
       for (let j = i + 1; j < amounts.length; j++) {
         const ratio = Math.min(amounts[i], amounts[j]) / Math.max(amounts[i], amounts[j]);
@@ -855,18 +996,15 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Need 4+ consecutive similar OR 6+ similar pairs to flag as bundled
+
     return maxConsecutive >= 4 || similarPairs >= 6;
   }
 
-  // =====================================================
-  // Fetch project links — website & twitter content
-  // =====================================================
 
   private async fetchProjectLinks(mint?: string, websiteUrl?: string, twitterUrl?: string, telegramUrl?: string, cachedTokenInfo?: any): Promise<any> {
     const result: any = { mint: mint || null, website: null, twitter: null, telegram: null };
 
-    // ALWAYS resolve URLs from token metadata first — metadata is the source of truth
+
     if (mint) {
       const tokenInfo = cachedTokenInfo || await this.fetchTokenMetadata(mint) || this.ctx.memory.getToken(mint);
       if (tokenInfo) {
@@ -878,7 +1016,7 @@ export class TokenAnalyzerSkill implements Skill {
           telegram: tokenInfo.telegram || null,
         };
 
-        // Track user-provided links that differ from metadata for the report
+
         const userProvided: any = {};
         if (websiteUrl && websiteUrl !== tokenInfo.website) userProvided.website = websiteUrl;
         if (twitterUrl && twitterUrl !== tokenInfo.twitter) userProvided.twitter = twitterUrl;
@@ -888,7 +1026,7 @@ export class TokenAnalyzerSkill implements Skill {
           result.warning = 'User-provided links differ from on-chain token metadata. Only metadata links are official.';
         }
 
-        // STRICT: only use metadata links when mint is provided
+
         websiteUrl = tokenInfo.website || undefined;
         twitterUrl = tokenInfo.twitter || undefined;
         telegramUrl = tokenInfo.telegram || undefined;
@@ -897,11 +1035,11 @@ export class TokenAnalyzerSkill implements Skill {
 
     const promises: Promise<void>[] = [];
 
-    // Fetch website content
+
     if (websiteUrl) {
       promises.push((async () => {
         try {
-          // Validate URL — must be http/https
+
           const parsed = new URL(websiteUrl!);
           if (!['http:', 'https:'].includes(parsed.protocol)) {
             result.website = { url: websiteUrl, error: 'Invalid protocol' };
@@ -923,14 +1061,14 @@ export class TokenAnalyzerSkill implements Skill {
             return;
           }
           const html = await res.text();
-          // Extract meaningful content from HTML
+
           const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() || '';
           const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
           const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
           const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
           const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
 
-          // Extract visible text (strip tags, scripts, styles)
+
           const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
           let bodyText = bodyMatch ? bodyMatch[1] : html;
           bodyText = bodyText
@@ -948,20 +1086,20 @@ export class TokenAnalyzerSkill implements Skill {
             .trim()
             .slice(0, 10000);
 
-          // Extract all links from the page
+
           const linkMatches = [...html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi)];
           const externalLinks = linkMatches
             .map(m => ({ url: m[1], text: m[2]?.trim() }))
             .filter(l => l.url.startsWith('http') && !l.url.includes(parsed.hostname))
             .slice(0, 30);
 
-          // Extract headings for structure understanding
+
           const headings = [...html.matchAll(/<h[1-4][^>]*>([^<]*(?:<[^>]+>[^<]*)*)<\/h[1-4]>/gi)]
             .map(m => m[1].replace(/<[^>]+>/g, '').trim())
             .filter(h => h.length > 2)
             .slice(0, 25);
 
-          // Check for important indicators
+
           const htmlLower = html.toLowerCase();
           const hasRoadmap = /roadmap|phases?\s|milestone/i.test(html);
           const hasTeam = /team|founders?|about\s+us|who\s+we\s+are/i.test(html);
@@ -972,11 +1110,11 @@ export class TokenAnalyzerSkill implements Skill {
           const hasBuyButton = /buy now|buy token|swap|trade now|get started/i.test(html);
           const hasContract = /contract|address|0x[a-f0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/i.test(html);
 
-          // Detect tech stack / framework hints
+
           const isReact = /react|__next|_next/i.test(html);
           const isWordpress = /wp-content|wordpress/i.test(html);
 
-          // Detect if it's just a placeholder/parked domain
+
           const isPlaceholder = bodyText.length < 100 || /coming\s+soon|under\s+construction|parked|domain\s+for\s+sale/i.test(bodyText);
 
           result.website = {
@@ -1010,15 +1148,15 @@ export class TokenAnalyzerSkill implements Skill {
       })());
     }
 
-    // Fetch Twitter/X profile
+
     if (twitterUrl) {
       promises.push((async () => {
         try {
-          // Normalize Twitter URL to get username
+
           let username = twitterUrl!;
-          // Handle various formats: https://x.com/user, https://twitter.com/user, @user
+
           username = username.replace(/^https?:\/\/(www\.)?(twitter\.com|x\.com)\/?/i, '').replace(/^@/, '');
-          // Handle paths like /i/communities/XXX or /user/status/123
+
           if (username.startsWith('i/') || username.includes('/status/')) {
             const isTweet = username.includes('/status/');
             const tweetId = isTweet ? username.match(/status\/(\d+)/)?.[1] : null;
@@ -1031,10 +1169,10 @@ export class TokenAnalyzerSkill implements Skill {
               communityOrTweetId: username.split('/').pop(),
             };
 
-            // Try authenticated deep fetch for tweet links
+
             const twCookies = process.env.TWITTER_COOKIES || '';
             if (isTweet && tweetId && twCookies) {
-              // Fetch tweet + author profile in PARALLEL for speed
+
               const [tweetData, authorProfile] = await Promise.all([
                 this.fetchTweetAuthenticated(tweetId, twCookies),
                 tweetAuthor ? this.fetchTwitterAuthenticated(tweetAuthor, twCookies) : Promise.resolve(null),
@@ -1057,7 +1195,7 @@ export class TokenAnalyzerSkill implements Skill {
               }
             }
 
-            // Fallback: OG scraping for tweet/community links
+
             try {
               const controller = new AbortController();
               const timeout = setTimeout(() => controller.abort(), 8000);
@@ -1078,13 +1216,13 @@ export class TokenAnalyzerSkill implements Skill {
             return;
           }
 
-          username = username.split('/')[0].split('?')[0]; // Clean trailing paths/params
+          username = username.split('/')[0].split('?')[0];
           if (!username || username.length > 50) {
             result.twitter = { url: twitterUrl, error: 'Could not parse username' };
             return;
           }
 
-          // Try authenticated Twitter API if cookies are configured
+
           const twCookies = process.env.TWITTER_COOKIES || '';
           if (twCookies) {
             const authResult = await this.fetchTwitterAuthenticated(username, twCookies);
@@ -1092,17 +1230,16 @@ export class TokenAnalyzerSkill implements Skill {
               result.twitter = { url: twitterUrl, ...authResult };
               return;
             }
-            // Fall through if auth fails
+
           }
 
-          // Without cookies, we can't get real Twitter data (X blocks all public scraping)
-          // Just record the link exists — scoring will handle this via tokenInfo.twitter check
+
           result.twitter = {
             url: twitterUrl,
             username,
             displayName: username,
             note: 'Twitter data requires cookies. Configure TWITTER_COOKIES env variable for full profile analysis.',
-            profileExists: true, // We know the link was set by the dev
+            profileExists: true,
           };
         } catch (err: any) {
           result.twitter = { url: twitterUrl, error: err.message };
@@ -1110,12 +1247,12 @@ export class TokenAnalyzerSkill implements Skill {
       })());
     }
 
-    // Fetch Telegram group/channel info
+
     if (telegramUrl) {
       promises.push((async () => {
         try {
           let tgHandle = telegramUrl!;
-          // Normalize: https://t.me/group → group
+
           tgHandle = tgHandle.replace(/^https?:\/\/(www\.)?(t\.me|telegram\.me)\/?/i, '');
           tgHandle = tgHandle.split('/')[0].split('?')[0].replace(/^@/, '');
           if (!tgHandle || tgHandle.length > 100) {
@@ -1123,10 +1260,10 @@ export class TokenAnalyzerSkill implements Skill {
             return;
           }
 
-          // Fetch the t.me page preview (works without auth)
+
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 8000);
-          const res = await fetch(`https://t.me/${tgHandle}`, {
+                    const res = await fetch(`https://t.me/${tgHandle}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' },
             signal: controller.signal,
             redirect: 'follow',
@@ -1143,11 +1280,11 @@ export class TokenAnalyzerSkill implements Skill {
           const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
           const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
 
-          // Extract subscriber/member count from page
-          const membersMatch = html.match(/<div[^>]*class="[^"]*tgme_page_extra[^"]*"[^>]*>([^<]*)<\/div>/i)?.[1]?.trim() || '';
-          const subCount = membersMatch.match(/([\d\s,.]+)\s*(members?|subscribers?|подписчик)/i)?.[1]?.replace(/\s/g, '') || null;
 
-          // Check if it's a channel, group, or bot
+          const membersMatch = html.match(/<div[^>]*class="[^"]*tgme_page_extra[^"]*"[^>]*>([^<]*)<\/div>/i)?.[1]?.trim() || '';
+          const subCount = membersMatch.match(/([\d\s,.]+)\s*(members?|subscribers?)/i)?.[1]?.replace(/\s/g, '') || null;
+
+
           const isChannel = /channel/i.test(html);
           const isGroup = /group|chat/i.test(membersMatch);
           const isBot = /bot$/i.test(tgHandle);
@@ -1177,15 +1314,15 @@ export class TokenAnalyzerSkill implements Skill {
     return result;
   }
 
-  // Authenticated Twitter profile fetch using cookies (auth_token + ct0)
+
   private async fetchTwitterAuthenticated(username: string, cookies: string): Promise<any> {
     try {
-      // Extract ct0 from cookies for CSRF header
+
       const ct0Match = cookies.match(/ct0=([^;]+)/);
       const ct0 = ct0Match?.[1] || '';
       if (!ct0) return { error: 'ct0 cookie not found' };
 
-      // Twitter's internal GraphQL API for UserByScreenName
+
       const variables = JSON.stringify({ screen_name: username, withSafetyModeUserFields: true });
       const features = JSON.stringify({
         hidden_profile_subscriptions_enabled: true,
@@ -1207,7 +1344,7 @@ export class TokenAnalyzerSkill implements Skill {
       const timeout = setTimeout(() => controller.abort(), 10000);
 
       const res = await fetch(
-        `https://x.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?${params}`,
+        `https://x.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?${params.toString()}`,
         {
           headers: {
             'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
@@ -1237,7 +1374,7 @@ export class TokenAnalyzerSkill implements Skill {
       const createdAt = legacy.created_at ? new Date(legacy.created_at) : null;
       const accountAgeDays = createdAt ? Math.floor((Date.now() - createdAt.getTime()) / 86400000) : null;
 
-      // Fetch recent tweets
+
       let recentTweets: any[] = [];
       try {
         const tweetsVars = JSON.stringify({
@@ -1277,7 +1414,7 @@ export class TokenAnalyzerSkill implements Skill {
         const tweetsController = new AbortController();
         const tweetsTimeout = setTimeout(() => tweetsController.abort(), 8000);
         const tweetsRes = await fetch(
-          `https://x.com/i/api/graphql/E3opETHurmVJflFsUBVuUQ/UserTweets?${tweetsParams}`,
+          `https://x.com/i/api/graphql/E3opETHurmVJflFsUBVuUQ/UserTweets?${tweetsParams.toString()}`,
           {
             headers: {
               'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
@@ -1309,12 +1446,12 @@ export class TokenAnalyzerSkill implements Skill {
               views: tweet.views?.count || null,
               bookmarks: tl.bookmark_count || 0,
             };
-            // Extract links from tweet entities
+
             const tweetUrls = tl.entities?.urls || [];
             if (tweetUrls.length > 0) {
               tweetEntry.links = tweetUrls.map((u: any) => ({ displayUrl: u.display_url, expandedUrl: u.expanded_url }));
             }
-            // Include quoted tweet content if present
+
             const quoted = tweet.quoted_status_result?.result?.legacy;
             if (quoted?.full_text) {
               tweetEntry.quotedTweet = {
@@ -1323,7 +1460,7 @@ export class TokenAnalyzerSkill implements Skill {
                 likes: quoted.favorite_count || 0,
               };
             }
-            // Include media types
+
             const media = tl.entities?.media || tl.extended_entities?.media || [];
             if (media.length > 0) {
               tweetEntry.media = media.map((m: any) => m.type).filter(Boolean);
@@ -1332,7 +1469,7 @@ export class TokenAnalyzerSkill implements Skill {
             if (recentTweets.length >= 10) break;
           }
         }
-      } catch { /* non-critical */ }
+      } catch {  }
 
       return {
         username,
@@ -1358,11 +1495,8 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /**
-   * Public handler for fetch_tweet tool — browser-first, API fallback.
-   */
   private async handleFetchTweet(urlOrId: string): Promise<any> {
-    // Extract tweet ID
+
     let tweetUrl = urlOrId.trim();
     let tweetId = tweetUrl;
     const statusMatch = tweetUrl.match(/\/status\/(\d+)/);
@@ -1374,14 +1508,13 @@ export class TokenAnalyzerSkill implements Skill {
       return { error: `Could not extract tweet ID from: ${urlOrId}` };
     }
     if (!tweetUrl.startsWith('http')) {
-      tweetUrl = `https://x.com/i/status/${tweetId}`;
+      tweetUrl = `https://${tweetUrl}`;
     }
 
-    // 1) Primary: API fetch (vxtwitter first, then GraphQL with cookies)
     const cookies = process.env.TWITTER_COOKIES || '';
-    const authorMatch = urlOrId.match(/(?:twitter\.com|x\.com)\/([^\/]+)\/status\//i);
+    const authorMatch = urlOrId.match(/(?:twitter\.com|x\.com)\/([^\/]+)\/status/);
     const authorUsername = authorMatch?.[1] || '_';
-    // Store author hint for vxtwitter URL construction
+
     (this as any)._lastTweetAuthor = authorUsername;
 
     {
@@ -1403,14 +1536,14 @@ export class TokenAnalyzerSkill implements Skill {
             createdAt: authorProfile.createdAt,
           };
         }
-        // Follow links found in tweet text
+
         await this.followTweetLinks(tweetData);
         return tweetData;
       }
       this.logger.info(`[fetch_tweet] API FAILED: ${JSON.stringify(tweetData?.error || tweetData)}, trying browser...`);
     }
 
-    // 2) Fallback: browser-based fetch
+
     this.logger.info(`[fetch_tweet] Browser fallback available: ${!!this.ctx.browser}`);
     if (this.ctx.browser) {
       try {
@@ -1428,15 +1561,11 @@ export class TokenAnalyzerSkill implements Skill {
     return { error: 'All methods to fetch tweet failed (syndication + GraphQL + browser). Check Twitter cookies in Settings.' };
   }
 
-  /**
-   * Search Twitter/X for token mentions by ticker, name, or contract address.
-   * Uses GraphQL SearchTimeline with cookies, falls back to vxtwitter scraping.
-   */
-  private async searchTwitterForToken(query: string, limit: number = 20): Promise<any> {
+private async searchTwitterForToken(query: string, limit: number = 20): Promise<any> {
     limit = Math.min(limit, 50);
     const cookies = process.env.TWITTER_COOKIES || '';
 
-    // Try authenticated GraphQL search first
+
     if (cookies) {
       try {
         const ct0Match = cookies.match(/ct0=([^;]+)/);
@@ -1477,7 +1606,7 @@ export class TokenAnalyzerSkill implements Skill {
           const searchQueryIds = ['MjnRHMPnLNDKnQr9j0wP4A', 'gkjsKepM6gl_HmFWoWKfgg'];
           for (const qid of searchQueryIds) {
             try {
-              const res = await fetch(`https://x.com/i/api/graphql/${qid}/SearchTimeline?${params}`, {
+                            const res = await fetch(`https://x.com/i/api/graphql/${qid}/SearchTimeline?${params.toString()}`, {
                 headers: {
                   'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
                   'Cookie': cookies,
@@ -1520,7 +1649,6 @@ export class TokenAnalyzerSkill implements Skill {
                   },
                 };
 
-                // Extract links from entities
                 const urls = tl.entities?.urls || [];
                 if (urls.length > 0) {
                   tweetEntry.links = urls.map((u: any) => ({ displayUrl: u.display_url, expandedUrl: u.expanded_url }));
@@ -1531,7 +1659,7 @@ export class TokenAnalyzerSkill implements Skill {
               }
 
               if (tweets.length > 0) {
-                // Compute summary stats
+
                 const totalLikes = tweets.reduce((s, t) => s + (t.engagement?.likes || 0), 0);
                 const totalRetweets = tweets.reduce((s, t) => s + (t.engagement?.retweets || 0), 0);
                 const uniqueAuthors = new Set(tweets.map(t => t.author?.username)).size;
@@ -1561,11 +1689,11 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // Fallback: use Nitter search instances
+
     const nitterInstances = ['nitter.net', 'nitter.cz', 'xcancel.com'];
     for (const instance of nitterInstances) {
       try {
-        const res = await fetch(`https://${instance}/search?q=${encodeURIComponent(query)}&f=tweets`, {
+                const res = await fetch(`https://${instance}/search?q=${encodeURIComponent(query)}&f=tweets`, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html',
@@ -1575,7 +1703,6 @@ export class TokenAnalyzerSkill implements Skill {
         if (!res.ok) continue;
         const html = await res.text();
 
-        // Parse Nitter search results
         const tweetMatches = [...html.matchAll(/<div class="timeline-item[^"]*"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi)];
         if (tweetMatches.length === 0) continue;
 
@@ -1617,12 +1744,8 @@ export class TokenAnalyzerSkill implements Skill {
     };
   }
 
-  /**
-   * Follow URLs found in a tweet — fetch page content for GitHub repos, YouTube, websites etc.
-   * Mutates tweetData by adding `linkedContent` array.
-   */
-  private async followTweetLinks(tweetData: any): Promise<void> {
-    // Collect URLs from links array (GraphQL) and from tweet text
+private async followTweetLinks(tweetData: any): Promise<void> {
+
     const urls = new Set<string>();
     if (tweetData.links?.length) {
       for (const l of tweetData.links) {
@@ -1630,30 +1753,30 @@ export class TokenAnalyzerSkill implements Skill {
         if (url && url.startsWith('http')) urls.add(url);
       }
     }
-    // Also extract URLs from fullText
+
     if (tweetData.fullText) {
       const urlRegex = /https?:\/\/[^\s"'<>)\]]+/gi;
       const textUrls = tweetData.fullText.match(urlRegex) || [];
       for (const u of textUrls) {
-        // Skip twitter/x.com links (self-referencing)
+
         if (!/(?:twitter\.com|x\.com|t\.co)\//i.test(u)) urls.add(u);
       }
     }
     if (urls.size === 0) return;
 
-    // Fetch up to 5 links in parallel with timeout
+
     const linkResults: any[] = [];
     const fetchPromises = [...urls].slice(0, 5).map(async (url) => {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
 
-        // GitHub API for repos
+
         const ghMatch = url.match(/github\.com\/([^\/]+\/[^\/\s?#]+)/i);
         if (ghMatch) {
           const repoPath = ghMatch[1].replace(/\.git$/, '');
           try {
-            const apiRes = await fetch(`https://api.github.com/repos/${repoPath}`, {
+                        const apiRes = await fetch(`https://api.github.com/repos/${repoPath}`, {
               headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AXIOM/1.0' },
               signal: controller.signal,
             });
@@ -1676,9 +1799,9 @@ export class TokenAnalyzerSkill implements Skill {
                 topics: repo.topics || [],
                 defaultBranch: repo.default_branch,
               });
-              // Also fetch README
+
               try {
-                const readmeRes = await fetch(`https://api.github.com/repos/${repoPath}/readme`, {
+                                const readmeRes = await fetch(`https://api.github.com/repos/${repoPath}/readme`, {
                   headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AXIOM/1.0' },
                   signal: AbortSignal.timeout(8000),
                 });
@@ -1689,13 +1812,13 @@ export class TokenAnalyzerSkill implements Skill {
                     linkResults[linkResults.length - 1].readme = readme.slice(0, 5000);
                   }
                 }
-              } catch { /* non-critical */ }
+              } catch {  }
               return;
             }
-          } catch { /* fall through to generic fetch */ }
+          } catch {  }
         }
 
-        // Generic page fetch
+
         const res = await fetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -1719,7 +1842,7 @@ export class TokenAnalyzerSkill implements Skill {
         const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
         const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i)?.[1]?.trim() || '';
 
-        // Extract visible text
+
         let bodyText = (html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html)
           .replace(/<script[\s\S]*?<\/script>/gi, '')
           .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -1747,11 +1870,8 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /**
-   * Public handler for fetch_twitter_profile tool — browser-first, API fallback.
-   */
-  private async handleFetchTwitterProfile(usernameOrUrl: string): Promise<any> {
-    // Normalize username
+private async handleFetchTwitterProfile(usernameOrUrl: string): Promise<any> {
+
     let username = usernameOrUrl.trim().replace(/^@/, '');
     username = username.replace(/^https?:\/\/(www\.)?(twitter\.com|x\.com)\/?/i, '');
     username = username.split('/')[0];
@@ -1762,7 +1882,6 @@ export class TokenAnalyzerSkill implements Skill {
 
     const profileUrl = `https://x.com/${username}`;
 
-    // 1) Primary: API fetch with cookies (auto-captured by extension)
     const cookies = process.env.TWITTER_COOKIES || '';
     if (cookies) {
       const result = await this.fetchTwitterAuthenticated(username, cookies);
@@ -1770,7 +1889,7 @@ export class TokenAnalyzerSkill implements Skill {
       this.logger.debug(`[fetch_twitter_profile] API failed: ${result?.error}, trying browser...`);
     }
 
-    // 2) Fallback: browser-based fetch
+
     if (this.ctx.browser) {
       try {
         const browserResult = await this.ctx.browser.fetchTwitterProfile(profileUrl);
@@ -1785,15 +1904,11 @@ export class TokenAnalyzerSkill implements Skill {
     return { error: 'Twitter cookies not configured. Install the browser extension or add cookies manually in Settings → Twitter.' };
   }
 
-  /**
-   * Fetch a specific tweet by ID.
-   * Priority: 1) vxtwitter public API (no auth needed) 2) GraphQL with cookies
-   */
-  private async fetchTweetAuthenticated(tweetId: string, cookies: string): Promise<any> {
-    // Extract author from URL if available (stored on class temporarily)
+private async fetchTweetAuthenticated(tweetId: string, cookies: string): Promise<any> {
+
     const authorHint = (this as any)._lastTweetAuthor || '_';
 
-    // 1) vxtwitter API — public, stable, no auth needed
+
     try {
       const vxRes = await fetch(
         `https://api.vxtwitter.com/${authorHint}/status/${tweetId}`,
@@ -1844,7 +1959,7 @@ export class TokenAnalyzerSkill implements Skill {
           if (vx.communityNote) {
             result.communityNote = vx.communityNote;
           }
-          // Extract links from tweet text for vxtwitter (GraphQL path uses entities.urls)
+
           if (result.fullText) {
             const urlRegex = /https?:\/\/[^\s"'<>)\]]+/gi;
             const textUrls = (result.fullText.match(urlRegex) || [])
@@ -1861,7 +1976,7 @@ export class TokenAnalyzerSkill implements Skill {
       this.logger.info(`[fetch_tweet] vxtwitter error: ${vxErr.message}, trying GraphQL...`);
     }
 
-    // 2) GraphQL with cookies (fallback — needs valid cookies + queryId)
+
     try {
       const ct0Match = cookies.match(/ct0=([^;]+)/);
       const ct0 = ct0Match?.[1] || '';
@@ -1898,7 +2013,7 @@ export class TokenAnalyzerSkill implements Skill {
 
       for (const qid of queryIds) {
         try {
-          const res = await fetch(`https://x.com/i/api/graphql/${qid}/TweetResultByRestId?${params}`, {
+                    const res = await fetch(`https://x.com/i/api/graphql/${qid}/TweetDetail?${params.toString()}`, {
             headers: {
               'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
               'Cookie': cookies, 'X-Csrf-Token': ct0,
@@ -1942,12 +2057,9 @@ export class TokenAnalyzerSkill implements Skill {
     return { error: 'All Twitter API methods failed (vxtwitter + GraphQL)' };
   }
 
-  // =====================================================
-  // Rate Project — comprehensive shield/rating
-  // =====================================================
 
   private async rateProject(mint: string): Promise<any> {
-    // Gather all data in parallel — prefer fresh API data over stale memory cache
+
     const tokenInfo = await this.fetchTokenMetadata(mint) || this.ctx.memory.getToken(mint);
     if (!tokenInfo) {
       return { error: 'Token not found', mint };
@@ -1960,9 +2072,9 @@ export class TokenAnalyzerSkill implements Skill {
       this.fetchTokenAth(mint),
       this.fetchGmgnSecurity(mint),
       this.fetchRugCheck(mint),
-      // Twitter search by ticker ($SYMBOL + token name)
+
       this.searchTwitterForToken(`$${tokenInfo.symbol || ''} ${tokenInfo.name || ''}`.trim(), 15),
-      // Twitter search by contract address
+
       this.searchTwitterForToken(mint, 10),
     ]);
 
@@ -1975,7 +2087,7 @@ export class TokenAnalyzerSkill implements Skill {
     const tickerSearchData = twitterSearchByTicker.status === 'fulfilled' ? twitterSearchByTicker.value : null;
     const contractSearchData = twitterSearchByContract.status === 'fulfilled' ? twitterSearchByContract.value : null;
 
-    // ── Category scoring (each 0-100) ──
+
     const categories: Record<string, { score: number; maxScore: number; details: string[] }> = {
       legitimacy: { score: 0, maxScore: 100, details: [] },
       community: { score: 0, maxScore: 100, details: [] },
@@ -1985,7 +2097,7 @@ export class TokenAnalyzerSkill implements Skill {
       narrative: { score: 0, maxScore: 100, details: [] },
     };
 
-    // ── TOKEN TYPE DETECTION: MEME vs FUNDAMENTAL ──
+
     const ws = linksData?.website;
     const tw = linksData?.twitter;
 
@@ -2004,7 +2116,7 @@ export class TokenAnalyzerSkill implements Skill {
       'peepo', 'ascii', 'pixel', 'troll', 'mog', 'gigachad', 'sigma'];
     const memeHits = memeWords.filter(w => typeText.includes(w));
 
-    // Fundamental signals from website structure
+
     const fundIndicators: string[] = [];
     if (ws && !ws.error) {
       if (ws.indicators?.hasRoadmap) fundIndicators.push('roadmap');
@@ -2020,15 +2132,15 @@ export class TokenAnalyzerSkill implements Skill {
 
     const memeStrength = memeHits.length * 2;
     const fundStrength = fundIndicators.length * 3 + fundHits.length * 2;
-    // Default to MEME — most pump.fun tokens are memes unless strong fundamental signals
+
     const tokenType: 'MEME' | 'FUNDAMENTAL' | 'HYBRID' =
       fundStrength >= 6 && fundStrength > memeStrength ? 'FUNDAMENTAL' :
       fundStrength >= 4 && memeStrength >= 4 ? 'HYBRID' : 'MEME';
     const isMeme = tokenType === 'MEME' || tokenType === 'HYBRID';
 
-    // ── LEGITIMACY (adaptive: meme vs fundamental) ──
+
     if (isMeme) {
-      // Memes: social presence + meme appeal + community traction (NOT roadmap/team/docs/audit)
+
       if (ws && !ws.error) {
         categories.legitimacy.score += 20;
         categories.legitimacy.details.push('Website exists');
@@ -2047,7 +2159,7 @@ export class TokenAnalyzerSkill implements Skill {
           else if (followerNum > 50) { categories.legitimacy.score += 10; categories.legitimacy.details.push(`Some followers: ${tw.followers}`); }
         }
       } else if (tokenInfo.twitter) {
-        // Twitter link exists in metadata — give credit for having it set up, even if we can't scrape it
+
         categories.legitimacy.score += 15;
         categories.legitimacy.details.push('Twitter link set up (profile data unavailable — configure cookies for full analysis)');
       }
@@ -2055,7 +2167,7 @@ export class TokenAnalyzerSkill implements Skill {
       if (tokenInfo.description && tokenInfo.description.length > 10) { categories.legitimacy.score += 10; categories.legitimacy.details.push('Has description'); }
       if (tokenInfo.image) { categories.legitimacy.score += 10; categories.legitimacy.details.push('Has token image/branding'); }
     } else {
-      // Fundamental tokens: website quality, team, docs, audit matter
+
       if (ws && !ws.error) {
         categories.legitimacy.score += 15;
         categories.legitimacy.details.push('Website exists and loads');
@@ -2092,7 +2204,7 @@ export class TokenAnalyzerSkill implements Skill {
     }
     categories.legitimacy.score = Math.min(100, Math.max(0, categories.legitimacy.score));
 
-    // ── COMMUNITY: holders, comments, social activity ──
+
     const analysisAny = analysisData as any;
     const totalHolders = analysisAny?.topHoldersInfo?.totalHolders || 0;
     if (totalHolders > 500) { categories.community.score += 30; categories.community.details.push(`${totalHolders} holders — strong community`); }
@@ -2108,7 +2220,7 @@ export class TokenAnalyzerSkill implements Skill {
       categories.community.score += 10;
       categories.community.details.push('Twitter bio present');
     }
-    // Activity proxied from market data
+
     if (marketData && !marketData.error) {
       const m5Txns = (marketData.m5?.buys || 0) + (marketData.m5?.sells || 0);
       if (m5Txns > 20) { categories.community.score += 30; categories.community.details.push(`Very active: ${m5Txns} txns in 5m`); }
@@ -2116,8 +2228,8 @@ export class TokenAnalyzerSkill implements Skill {
       else if (m5Txns > 0) { categories.community.score += 10; categories.community.details.push(`Some activity: ${m5Txns} txns in 5m`); }
       else { categories.community.details.push('No recent transactions'); }
     }
-    // Twitter search — external community discussion
-    // Only score if at least one search actually succeeded (not errored)
+
+
     const tickerTweets = tickerSearchData?.totalResults || 0;
     const contractTweets = contractSearchData?.totalResults || 0;
     const totalSearchTweets = tickerTweets + contractTweets;
@@ -2133,7 +2245,7 @@ export class TokenAnalyzerSkill implements Skill {
     }
     categories.community.score = Math.min(100, Math.max(0, categories.community.score));
 
-    // ── DEV TRUST: dev wallet reputation ──
+
     if (analysisAny?.creatorInfo) {
       const ci = analysisAny.creatorInfo;
       const gradRate = ci.graduated / Math.max(ci.totalCoinsCreated, 1);
@@ -2151,21 +2263,21 @@ export class TokenAnalyzerSkill implements Skill {
       if (analysisData.rugScore < 30) { categories.devTrust.score += 20; categories.devTrust.details.push('Low rug risk'); }
       else if (analysisData.rugScore > 70) { categories.devTrust.score -= 20; categories.devTrust.details.push('HIGH rug risk!'); }
     }
-    // GMGN security signals for devTrust
+
     if (gmgnData && !gmgnData.error) {
       if (gmgnData.creatorPercentage === 0) { categories.devTrust.score += 10; categories.devTrust.details.push('Dev sold all tokens — no dump risk'); }
       if (gmgnData.mintAuthority) { categories.devTrust.score -= 20; categories.devTrust.details.push('⚠️ Mint authority NOT revoked!'); }
       if (gmgnData.freezeAuthority) { categories.devTrust.score -= 15; categories.devTrust.details.push('⚠️ Freeze authority NOT revoked!'); }
       if (gmgnData.isHoneypot) { categories.devTrust.score -= 40; categories.devTrust.details.push('🍯 HONEYPOT — cannot sell!'); }
     }
-    // RugCheck risk score
+
     if (rugcheckData && !rugcheckData.error && rugcheckData.score != null) {
       if (rugcheckData.score > 700) { categories.devTrust.score += 10; categories.devTrust.details.push(`RugCheck: GOOD (${rugcheckData.score})`); }
       else if (rugcheckData.score < 300) { categories.devTrust.score -= 15; categories.devTrust.details.push(`RugCheck: DANGER (${rugcheckData.score})`); }
     }
     categories.devTrust.score = Math.min(100, Math.max(0, categories.devTrust.score));
 
-    // ── TOKENOMICS: holder distribution, supply, curve ──
+
     if (analysisData) {
       const signals = analysisData.signals;
       if (signals.some((s: string) => /good distribution/i.test(s))) { categories.tokenomics.score += 30; categories.tokenomics.details.push('Good holder distribution'); }
@@ -2182,10 +2294,10 @@ export class TokenAnalyzerSkill implements Skill {
       categories.tokenomics.score += 10;
       categories.tokenomics.details.push(`Bonding at ${tokenInfo.bondingCurveProgress.toFixed(0)}% — early stage`);
     }
-    // Standard pump.fun supply = 1B, all identical — no extra scoring needed
-    categories.tokenomics.score += 20; // Baseline: pump.fun standard supply
+
+    categories.tokenomics.score += 20;
     categories.tokenomics.details.push('Standard 1B supply (pump.fun)');
-    // GMGN security data for tokenomics scoring
+
     if (gmgnData && !gmgnData.error) {
       if (gmgnData.insiderRate != null && gmgnData.insiderRate > 0.3) { categories.tokenomics.score -= 20; categories.tokenomics.details.push(`🕵️ Insiders hold ${(gmgnData.insiderRate * 100).toFixed(1)}% — heavy insider activity`); }
       else if (gmgnData.insiderRate != null && gmgnData.insiderRate > 0.1) { categories.tokenomics.score -= 10; categories.tokenomics.details.push(`Insiders hold ${(gmgnData.insiderRate * 100).toFixed(1)}%`); }
@@ -2201,13 +2313,12 @@ export class TokenAnalyzerSkill implements Skill {
     }
     categories.tokenomics.score = Math.min(100, Math.max(0, categories.tokenomics.score));
 
-    // ── MOMENTUM: price action, volume, ATH proximity ──
-    // Use pump.fun market data first, fall back to GMGN data for graduated tokens
+
     const hasMarketData = marketData && !marketData.error;
     const hasGmgnMomentum = gmgnData && !gmgnData.error && (gmgnData.volume24h || gmgnData.priceChange5m != null);
 
     if (hasMarketData || hasGmgnMomentum) {
-      // Volume (prefer pump.fun, fallback GMGN 24h volume)
+
       const h1Vol = hasMarketData ? (marketData.h1?.volume || 0) : 0;
       const vol24h = gmgnData?.volume24h || 0;
       if (h1Vol > 50000) { categories.momentum.score += 30; categories.momentum.details.push(`High 1h volume: $${(h1Vol / 1000).toFixed(1)}K`); }
@@ -2218,7 +2329,7 @@ export class TokenAnalyzerSkill implements Skill {
       else if (vol24h > 1000) { categories.momentum.score += 5; categories.momentum.details.push(`Low 24h volume: $${vol24h.toFixed(0)} (GMGN)`); }
       else { categories.momentum.details.push('Very low volume'); }
 
-      // Price changes (prefer pump.fun 5m, fallback GMGN)
+
       const m5Change = hasMarketData ? (marketData.m5?.priceChangePercent || 0) : (gmgnData?.priceChange5m || 0);
       const h1Change = hasMarketData ? (marketData.h1?.priceChangePercent || 0) : (gmgnData?.priceChange1h || 0);
 
@@ -2243,7 +2354,7 @@ export class TokenAnalyzerSkill implements Skill {
     }
     categories.momentum.score = Math.min(100, Math.max(0, categories.momentum.score));
 
-    // ── NARRATIVE: meta fit, website theme, description keywords ──
+
     const allText = [
       tokenInfo.name, tokenInfo.symbol, tokenInfo.description,
       ws?.title, ws?.description, ws?.contentPreview,
@@ -2271,7 +2382,7 @@ export class TokenAnalyzerSkill implements Skill {
       categories.narrative.details.push(`Fits narratives: ${detectedNarratives.join(', ')}`);
     }
     if (isMeme) {
-      // Meme-specific narrative scoring: virality, meme appeal, cultural relevance
+
       if (memeHits.length >= 3) { categories.narrative.score += 25; categories.narrative.details.push(`Strong meme identity (${memeHits.join(', ')})`); }
       else if (memeHits.length >= 1) { categories.narrative.score += 15; categories.narrative.details.push(`Meme references: ${memeHits.join(', ')}`); }
       if (tokenInfo.description && tokenInfo.description.length > 20) {
@@ -2291,7 +2402,147 @@ export class TokenAnalyzerSkill implements Skill {
     if (ws?.title && ws.title.length > 5) { categories.narrative.score += 10; }
     categories.narrative.score = Math.min(100, Math.max(0, categories.narrative.score));
 
-    // ── Overall score (weighted average — adaptive by token type) ──
+
+    const memeAppeal: { score: number; nameScore: number; imageScore: number; viralityScore: number; cutenessScore: number; humorScore: number; culturalTiming: number; details: string[] } = {
+      score: 0, nameScore: 0, imageScore: 0, viralityScore: 0, cutenessScore: 0, humorScore: 0, culturalTiming: 0, details: [],
+    };
+
+
+    const nameLen = (tokenInfo.name || '').length;
+    const symLen = (tokenInfo.symbol || '').length;
+    if (nameLen > 0 && nameLen <= 8) { memeAppeal.nameScore += 30; memeAppeal.details.push('Short catchy name'); }
+    else if (nameLen <= 15) { memeAppeal.nameScore += 20; }
+    else if (nameLen > 25) { memeAppeal.nameScore += 5; memeAppeal.details.push('Long name — harder to spread'); }
+    else { memeAppeal.nameScore += 15; }
+    if (symLen >= 3 && symLen <= 5) { memeAppeal.nameScore += 20; memeAppeal.details.push('Clean ticker'); }
+
+
+    const cuteWords = ['cat', 'dog', 'puppy', 'kitty', 'kitten', 'baby', 'smol', 'tiny', 'uwu', 'kawaii',
+      'panda', 'bunny', 'hamster', 'frog', 'owl', 'duck', 'chick', 'bear', 'fox', 'penguin',
+      'corgi', 'shiba', 'nyan', 'meow', 'woof', 'boop', 'snoot', 'floof', 'bean', 'potato'];
+    const humorWords = ['lol', 'lmao', 'bruh', 'kek', 'cope', 'based', 'gigachad', 'sigma', 'mog',
+      'yolo', 'stonk', 'rekt', 'wen', 'wagmi', 'ngmi', 'ser', 'gm', 'chad', 'wojak', 'pepe',
+      'troll', 'degen', 'ape', 'moon', 'lambo', 'diamond', 'hands', 'rocket'];
+    const viralWords = ['elon', 'trump', 'hawk', 'tuah', 'ai', 'gpt', 'agent', 'neiro', 'popcat',
+      'goat', 'wif', 'hat', 'bonk', 'pnut'];
+
+    const cuteHits = cuteWords.filter(w => typeText.includes(w));
+    const humorHits = humorWords.filter(w => typeText.includes(w));
+    const viralHits = viralWords.filter(w => typeText.includes(w));
+
+    if (cuteHits.length >= 2) { memeAppeal.cutenessScore = 80; memeAppeal.details.push(`Very cute: ${cuteHits.join(', ')}`); }
+    else if (cuteHits.length === 1) { memeAppeal.cutenessScore = 50; memeAppeal.details.push(`Cute element: ${cuteHits[0]}`); }
+
+    if (humorHits.length >= 3) { memeAppeal.humorScore = 80; memeAppeal.details.push(`Strong humor: ${humorHits.slice(0, 3).join(', ')}`); }
+    else if (humorHits.length >= 1) { memeAppeal.humorScore = 50; memeAppeal.details.push(`Humor: ${humorHits.join(', ')}`); }
+
+    if (viralHits.length >= 2) { memeAppeal.viralityScore = 80; memeAppeal.details.push(`Viral potential: ${viralHits.join(', ')}`); }
+    else if (viralHits.length === 1) { memeAppeal.viralityScore = 50; memeAppeal.details.push(`Viral hook: ${viralHits[0]}`); }
+
+
+    if (tokenInfo.image) { memeAppeal.imageScore += 40; memeAppeal.details.push('Has token image'); }
+    if (ws && !ws.error && !ws.indicators?.isPlaceholder) { memeAppeal.imageScore += 30; memeAppeal.details.push('Has branded website'); }
+    if (tw && !tw.error && tw.bio) { memeAppeal.imageScore += 30; memeAppeal.details.push('Has Twitter branding'); }
+
+
+    const timingWords = ['trump', 'elon', 'ai', 'gpt', 'agent', 'hawk', 'tuah', 'tiktok', 'sigma', 'skibidi', 'rizz'];
+    const timingHits = timingWords.filter(w => typeText.includes(w));
+    if (timingHits.length >= 2) { memeAppeal.culturalTiming = 80; memeAppeal.details.push(`Culturally timed: ${timingHits.join(', ')}`); }
+    else if (timingHits.length === 1) { memeAppeal.culturalTiming = 50; memeAppeal.details.push(`Cultural reference: ${timingHits[0]}`); }
+
+
+    memeAppeal.score = Math.round(
+      memeAppeal.nameScore * 0.2 +
+      memeAppeal.cutenessScore * 0.2 +
+      memeAppeal.humorScore * 0.15 +
+      memeAppeal.viralityScore * 0.2 +
+      memeAppeal.imageScore * 0.1 +
+      memeAppeal.culturalTiming * 0.15
+    );
+    memeAppeal.score = Math.min(100, Math.max(0, memeAppeal.score));
+
+
+    let trendFit: { score: number; currentMetas: string[]; matchedMetas: string[]; details: string[] } = {
+      score: 0, currentMetas: [], matchedMetas: [], details: [],
+    };
+    try {
+            const metaRes = await fetch('https://frontend-api-v3.pump.fun/metas/current', {
+        signal: AbortSignal.timeout(5000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (metaRes.ok) {
+        const metaData = await metaRes.json() as any[];
+        if (Array.isArray(metaData) && metaData.length > 0) {
+          trendFit.currentMetas = metaData.map((m: any) => typeof m === 'string' ? m : (m.name || m.meta || m.label || '')).filter(Boolean).slice(0, 15);
+
+
+          for (const meta of trendFit.currentMetas) {
+            const metaLower = meta.toLowerCase();
+            const metaWords = metaLower.split(/\s+/).filter(w => w.length > 2);
+            const matches = metaWords.some(mw => typeText.includes(mw)) || typeText.includes(metaLower);
+            if (matches) {
+              trendFit.matchedMetas.push(meta);
+            }
+          }
+
+          if (trendFit.matchedMetas.length >= 3) { trendFit.score = 90; trendFit.details.push(`🔥 Multi-meta fit: ${trendFit.matchedMetas.join(', ')}`); }
+          else if (trendFit.matchedMetas.length >= 2) { trendFit.score = 70; trendFit.details.push(`Strong meta fit: ${trendFit.matchedMetas.join(', ')}`); }
+          else if (trendFit.matchedMetas.length === 1) { trendFit.score = 50; trendFit.details.push(`Matches trending meta: ${trendFit.matchedMetas[0]}`); }
+          else { trendFit.score = 10; trendFit.details.push('Off-meta — doesn\'t match current trends'); }
+        }
+      }
+    } catch { trendFit.details.push('Could not fetch trending metas'); }
+
+
+    let crowdSignal: { analyzeCount: number; uniqueUsers: number; last24h: number; trend: string; hotness: number } = {
+      analyzeCount: 0, uniqueUsers: 0, last24h: 0, trend: 'new', hotness: 0,
+    };
+    try {
+      const db = (this.ctx.memory as any).getDb();
+
+      db.exec(`CREATE TABLE IF NOT EXISTS crowd_signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mint TEXT NOT NULL,
+        session_hash TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s','now') * 1000)
+      )`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_crowd_mint ON crowd_signals(mint)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_crowd_time ON crowd_signals(created_at)`);
+
+
+      const sessionHash = this.getSessionHash();
+      const insertStmt = db.prepare('INSERT INTO crowd_signals (mint, session_hash) VALUES (?, ?)');
+      insertStmt.run(mint, sessionHash);
+
+
+      const now = Date.now();
+      const h24ago = now - 24 * 60 * 60 * 1000;
+      const h1ago = now - 60 * 60 * 1000;
+
+      const totalRow = db.prepare('SELECT COUNT(*) as cnt, COUNT(DISTINCT session_hash) as users FROM crowd_signals WHERE mint = ?').get(mint) as any;
+      const last24Row = db.prepare('SELECT COUNT(*) as cnt FROM crowd_signals WHERE mint = ? AND created_at > ?').get(mint, h24ago) as any;
+      const lastHourRow = db.prepare('SELECT COUNT(*) as cnt FROM crowd_signals WHERE mint = ? AND created_at > ?').get(mint, h1ago) as any;
+
+      crowdSignal.analyzeCount = totalRow?.cnt || 0;
+      crowdSignal.uniqueUsers = totalRow?.users || 0;
+      crowdSignal.last24h = last24Row?.cnt || 0;
+
+
+      const prevDayRow = db.prepare('SELECT COUNT(*) as cnt FROM crowd_signals WHERE mint = ? AND created_at > ? AND created_at <= ?').get(mint, h24ago - 24 * 60 * 60 * 1000, h24ago) as any;
+      const prevDay = prevDayRow?.cnt || 0;
+
+      if (crowdSignal.analyzeCount <= 2) { crowdSignal.trend = 'new'; }
+      else if (crowdSignal.last24h > prevDay * 1.5) { crowdSignal.trend = 'rising'; }
+      else if (crowdSignal.last24h < prevDay * 0.5 && prevDay > 0) { crowdSignal.trend = 'falling'; }
+      else { crowdSignal.trend = 'stable'; }
+
+
+      const avgRow = db.prepare('SELECT AVG(cnt) as avg FROM (SELECT mint, COUNT(*) as cnt FROM crowd_signals WHERE created_at > ? GROUP BY mint)').get(h1ago) as any;
+      const avgLastHour = avgRow?.avg || 1;
+      crowdSignal.hotness = Math.min(100, Math.round(((lastHourRow?.cnt || 0) / Math.max(avgLastHour, 1)) * 50));
+    } catch {  }
+
+
     const weights = isMeme
       ? { legitimacy: 0.10, community: 0.25, devTrust: 0.20, tokenomics: 0.15, momentum: 0.15, narrative: 0.15 }
       : { legitimacy: 0.25, community: 0.15, devTrust: 0.25, tokenomics: 0.15, momentum: 0.10, narrative: 0.10 };
@@ -2301,18 +2552,18 @@ export class TokenAnalyzerSkill implements Skill {
     }
     overallScore = Math.round(overallScore);
 
-    // ── PATTERN UNIQUALIZER: check for repeated patterns ──
+
     const patternResult = this.checkPatternUniqueness(mint, tokenInfo, linksData);
-    
-    // Apply penalty to overall score
+
+
     if (patternResult.penalty > 0) {
       overallScore = Math.max(0, overallScore - patternResult.penalty);
     }
 
-    // Record this token's pattern fingerprint for future comparisons
+
     this.recordPattern(mint, tokenInfo, linksData, analysisData, detectedNarratives);
 
-    // ── Follow links from recent tweets (GitHub repos, websites, etc.) ──
+
     let tweetLinkedContent: any[] | undefined;
     if (tw && !tw.error && tw.recentTweets?.length) {
       const allTweetUrls = new Set<string>();
@@ -2325,7 +2576,7 @@ export class TokenAnalyzerSkill implements Skill {
             }
           }
         }
-        // Also extract from tweet text
+
         if (t.text) {
           const textUrls = t.text.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
           for (const u of textUrls) {
@@ -2334,7 +2585,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
       if (allTweetUrls.size > 0) {
-        // Follow up to 5 links — reuse followTweetLinks logic
+
         const pseudoTweet: {
           fullText: string;
           links: { expandedUrl: string }[];
@@ -2363,6 +2614,10 @@ export class TokenAnalyzerSkill implements Skill {
       categoryScores: Object.fromEntries(
         Object.entries(categories).map(([k, v]) => [k, { score: v.score, details: v.details }])
       ),
+
+      memeAppeal,
+      trendFit,
+      crowdSignal,
       detectedNarratives,
       websiteSummary: ws && !ws.error ? {
         title: ws.title,
@@ -2388,7 +2643,7 @@ export class TokenAnalyzerSkill implements Skill {
         createdAt: tw.createdAt,
         tweetCount: tw.tweets,
         recentTweets: (tw.recentTweets || []).slice(0, 5),
-        // Include tweet-specific data if the link was to a specific tweet
+
         ...(tw.type === 'tweet' ? {
           type: 'tweet',
           tweetContent: tw.fullText,
@@ -2398,30 +2653,30 @@ export class TokenAnalyzerSkill implements Skill {
           quotedTweet: tw.quotedTweet,
           authorProfile: tw.authorProfile,
         } : {}),
-        // Fetched content from links found in tweets
+
         ...(tweetLinkedContent?.length ? { linkedContent: tweetLinkedContent } : {}),
       } : null,
       rugScore: analysisData?.rugScore ?? null,
       marketCap: tokenInfo.marketCap,
       bondingProgress: tokenInfo.bondingCurveProgress,
-      // Include market activity data for AI to interpret
+
       marketActivity: marketData && !marketData.error ? marketData : null,
       athMarketCap: (athData && !athData.error ? (athData.ath_usd_market_cap || athData.athMarketCap || athData.ath_market_cap || null) : null)
         || (gmgnData && !gmgnData.error ? gmgnData.athMarketCap : null)
         || (tokenInfo as any)?._extra?.athMarketCap || null,
-      // Pattern uniqueness (self-learning clone/scam detection)
+
       patternAnalysis: {
         uniquenessScore: patternResult.uniquenessScore,
         penalty: patternResult.penalty,
         isClone: patternResult.isClone,
         matches: patternResult.matches,
       },
-      // Volume & price data from GMGN
+
       volume24h: gmgnData?.volume24h ?? null,
       priceChange5m: gmgnData?.priceChange5m ?? null,
       priceChange1h: gmgnData?.priceChange1h ?? null,
       priceChange24h: gmgnData?.priceChange24h ?? null,
-      // GMGN Token Security Data
+
       tokenSecurity: gmgnData && !gmgnData.error ? {
         top10HolderRate: gmgnData.top10HolderRate,
         devHolding: gmgnData.devHoldingRate,
@@ -2436,7 +2691,7 @@ export class TokenAnalyzerSkill implements Skill {
         buyTax: gmgnData.buyTax,
         sellTax: gmgnData.sellTax,
       } : null,
-      // RugCheck report
+
       rugcheckReport: rugcheckData && !rugcheckData.error ? {
         score: rugcheckData.score,
         risks: rugcheckData.risks,
@@ -2444,7 +2699,7 @@ export class TokenAnalyzerSkill implements Skill {
         markets: rugcheckData.markets,
       } : null,
 
-      // Twitter Search Intelligence (by ticker & contract)
+
       twitterSearch: (tickerSearchData || contractSearchData) ? {
         byTicker: tickerSearchData ? {
           totalResults: tickerSearchData.totalResults,
@@ -2486,13 +2741,8 @@ export class TokenAnalyzerSkill implements Skill {
     };
   }
 
-  // ===== PATTERN UNIQUALIZER — Self-learning scam/clone detection =====
 
-  /**
-   * Extract significant words from a text for fingerprinting.
-   * Normalizes, removes stopwords & short words, sorts for stable hashing.
-   */
-  private extractDescriptionWords(text: string): string[] {
+private extractDescriptionWords(text: string): string[] {
     if (!text) return [];
     const stopwords = new Set([
       'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -2514,26 +2764,20 @@ export class TokenAnalyzerSkill implements Skill {
       .sort();
   }
 
-  /**
-   * Simple hash of sorted word array for fast content comparison.
-   */
-  private hashWords(words: string[]): string {
+private hashWords(words: string[]): string {
     if (words.length === 0) return '';
-    // Simple deterministic hash 
+
     let hash = 0;
     const str = words.join('|');
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
-      hash |= 0; // Convert to 32bit integer
+      hash |= 0;
     }
     return hash.toString(36);
   }
 
-  /**
-   * Extract a name pattern — normalize common prefixes/suffixes (Baby X, X Inu, X Moon, etc.)
-   */
-  private extractNamePattern(name: string): string | null {
+private extractNamePattern(name: string): string | null {
     if (!name) return null;
     const lower = name.toLowerCase().trim();
     const patterns = [
@@ -2543,7 +2787,7 @@ export class TokenAnalyzerSkill implements Skill {
     for (const pat of patterns) {
       const m = lower.match(pat);
       if (m) {
-        // Return the template pattern (e.g., "baby *" or "* inu")
+
         if (pat.source.startsWith('^')) {
           return m[1].toLowerCase() + ' *';
         } else {
@@ -2554,10 +2798,7 @@ export class TokenAnalyzerSkill implements Skill {
     return null;
   }
 
-  /**
-   * Extract domain from URL for fingerprinting.
-   */
-  private extractDomain(url: string): string | null {
+private extractDomain(url: string): string | null {
     if (!url) return null;
     try {
       const parsed = new URL(url.startsWith('http') ? url : 'https://' + url);
@@ -2567,25 +2808,18 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /**
-   * Extract Twitter/Telegram handle from URL.
-   */
-  private extractHandle(url: string): string | null {
+private extractHandle(url: string): string | null {
     if (!url) return null;
-    // Twitter: x.com/handle or twitter.com/handle
+
     const twMatch = url.match(/(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)/i);
     if (twMatch) return twMatch[1].toLowerCase();
-    // Telegram: t.me/handle
+
     const tgMatch = url.match(/t\.me\/([a-zA-Z0-9_]+)/i);
     if (tgMatch) return tgMatch[1].toLowerCase();
     return null;
   }
 
-  /**
-   * Calculate word overlap percentage between two word arrays.
-   * Returns 0-1 (0 = no overlap, 1 = identical).
-   */
-  private wordOverlap(words1: string[], words2: string[]): number {
+private wordOverlap(words1: string[], words2: string[]): number {
     if (words1.length === 0 || words2.length === 0) return 0;
     const set1 = new Set(words1);
     const set2 = new Set(words2);
@@ -2597,10 +2831,7 @@ export class TokenAnalyzerSkill implements Skill {
     return unionSize > 0 ? overlap / unionSize : 0;
   }
 
-  /**
-   * Record a token's pattern fingerprint after analysis.
-   */
-  private recordPattern(mint: string, tokenInfo: TokenInfo, linksData: any, analysisData: any, detectedNarratives: string[]): void {
+private recordPattern(mint: string, tokenInfo: TokenInfo, linksData: any, analysisData: any, detectedNarratives: string[]): void {
     try {
       const descWords = this.extractDescriptionWords(tokenInfo.description || '');
       const websiteContent = linksData?.website?.fullContent || linksData?.website?.contentPreview || '';
@@ -2626,13 +2857,9 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /**
-   * Check how unique this token is against all stored patterns.
-   * Returns a uniqueness report with penalty score and matched patterns.
-   */
-  private checkPatternUniqueness(mint: string, tokenInfo: TokenInfo, linksData: any): {
-    uniquenessScore: number; // 0-100 (100 = fully unique, 0 = total clone)
-    penalty: number; // Points to subtract from overall score
+private checkPatternUniqueness(mint: string, tokenInfo: TokenInfo, linksData: any): {
+    uniquenessScore: number;
+    penalty: number;
     matches: { type: string; count: number; details: string; severity: 'low' | 'medium' | 'high' }[];
     isClone: boolean;
   } {
@@ -2640,11 +2867,11 @@ export class TokenAnalyzerSkill implements Skill {
     let penalty = 0;
 
     try {
-      // 1. Same dev launched other tokens
+
       if (tokenInfo.dev) {
         const devMatches = this.ctx.memory.findPatternsByDev(tokenInfo.dev, mint);
         if (devMatches.length > 0) {
-          // Check how many were recent (last 24h)
+
           const recent = devMatches.filter((m: any) => Date.now() - m.created_at < 86_400_000);
           const recentBadOutcome = devMatches.filter((m: any) => m.outcome === 'loss' || m.outcome === 'rug');
 
@@ -2674,7 +2901,7 @@ export class TokenAnalyzerSkill implements Skill {
             });
           }
 
-          // If dev's previous tokens had bad outcomes, heavier penalty
+
           if (recentBadOutcome.length >= 2) {
             penalty += 20;
             matches.push({
@@ -2687,7 +2914,6 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 2. Same Twitter account used for multiple tokens
       const twHandle = this.extractHandle(tokenInfo.twitter || '');
       if (twHandle) {
         const twMatches = this.ctx.memory.findPatternsByTwitter(twHandle, mint);
@@ -2702,7 +2928,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 3. Same Telegram group
+
       const tgHandle = this.extractHandle(tokenInfo.telegram || '');
       if (tgHandle) {
         const tgMatches = this.ctx.memory.findPatternsByTelegram(tgHandle, mint);
@@ -2717,7 +2943,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 4. Same website domain
+
       const domain = this.extractDomain(tokenInfo.website || '');
       if (domain) {
         const domainMatches = this.ctx.memory.findPatternsByWebsite(domain, mint);
@@ -2732,7 +2958,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 5. Same website content (template site)
+
       const websiteContent = linksData?.website?.fullContent || linksData?.website?.contentPreview || '';
       const websiteWords = this.extractDescriptionWords(websiteContent);
       if (websiteWords.length > 3) {
@@ -2749,7 +2975,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 6. Same name pattern (Baby X, X Inu, etc.)
+
       const namePattern = this.extractNamePattern(tokenInfo.name);
       if (namePattern) {
         const nameMatches = this.ctx.memory.findPatternsByNamePattern(namePattern, mint);
@@ -2772,7 +2998,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // 7. Description similarity check (word overlap with recent tokens)
+
       const descWords = this.extractDescriptionWords(tokenInfo.description || '');
       if (descWords.length > 3) {
         const allPatterns = this.ctx.memory.getAllPatternsWithDescriptions(mint, 200);
@@ -2786,7 +3012,7 @@ export class TokenAnalyzerSkill implements Skill {
               bestOverlap = overlap;
               bestMatch = p;
             }
-          } catch { /* skip bad data */ }
+          } catch {  }
         }
 
         if (bestOverlap > 0.7) {
@@ -2811,7 +3037,7 @@ export class TokenAnalyzerSkill implements Skill {
       this.logger.warn('Pattern uniqueness check error', err);
     }
 
-    // Cap penalty
+
     penalty = Math.min(penalty, 50);
     const uniquenessScore = Math.max(0, 100 - penalty * 2);
     const isClone = penalty >= 30;
@@ -2819,10 +3045,10 @@ export class TokenAnalyzerSkill implements Skill {
     return { uniquenessScore, penalty, matches, isClone };
   }
 
-  // Helper: fetch market activity from swap-api
+
   private async fetchMarketActivity(mint: string): Promise<any> {
     try {
-      const res = await fetch(`https://swap-api.pump.fun/v2/coins/${mint}/market-activity`, {
+            const res = await fetch(`https://frontend-api.pump.fun/coins/${mint}/trades?limit=50`, {
         headers: { 'Accept': 'application/json', 'Origin': 'https://pump.fun', 'Referer': 'https://pump.fun/' },
       });
       if (!res.ok) return { error: `HTTP ${res.status}` };
@@ -2832,10 +3058,10 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  // Helper: fetch ATH from swap-api
+
   private async fetchTokenAth(mint: string): Promise<any> {
     try {
-      const res = await fetch(`https://swap-api.pump.fun/v2/coins/${mint}/ath`, {
+            const res = await fetch(`https://frontend-api.pump.fun/coins/${mint}`, {
         headers: { 'Accept': 'application/json', 'Origin': 'https://pump.fun', 'Referer': 'https://pump.fun/' },
       });
       if (!res.ok) return { error: `HTTP ${res.status}` };
@@ -2847,12 +3073,10 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  // ===== GMGN + RUGCHECK — External security data + similar tokens =====
 
-  /** Fetch comprehensive token security data from GMGN.ai */
-  private async fetchGmgnSecurity(mint: string): Promise<any> {
+private async fetchGmgnSecurity(mint: string): Promise<any> {
     try {
-      const res = await fetch(`https://gmgn.ai/defi/quotation/v1/tokens/sol/${encodeURIComponent(mint)}`, {
+            const res = await fetch(`https://gmgn.ai/defi/quotation/v1/tokens/sol/${mint}`, {
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -2881,7 +3105,7 @@ export class TokenAnalyzerSkill implements Skill {
         creatorPercentage: t.creator_token_status === 'sell_all' ? 0 : (t.creator_percentage ?? null),
         launchpad: t.launchpad ?? null,
         openTimestamp: t.open_timestamp ?? null,
-        // Price & market data enrichment
+
         price: t.price ?? null,
         marketCap: t.market_cap ?? null,
         volume24h: t.volume_24h ?? null,
@@ -2891,7 +3115,7 @@ export class TokenAnalyzerSkill implements Skill {
         buyTax: t.buy_tax ?? null,
         sellTax: t.sell_tax ?? null,
         isHoneypot: t.is_honeypot ?? null,
-        // ATH data from GMGN
+
         athPrice: t.ath ?? t.highest_price ?? null,
         athMarketCap: t.ath_market_cap ?? t.high_market_cap ?? null,
       };
@@ -2900,10 +3124,9 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /** Fetch token security report from RugCheck */
-  private async fetchRugCheck(mint: string): Promise<any> {
+private async fetchRugCheck(mint: string): Promise<any> {
     try {
-      const res = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
+            const res = await fetch(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, {
         headers: { 'Accept': 'application/json' },
         signal: AbortSignal.timeout(10000),
       });
@@ -2936,8 +3159,7 @@ export class TokenAnalyzerSkill implements Skill {
     }
   }
 
-  /** Build a text-based bubble map showing holder clusters and concentration */
-  private buildBubbleMap(
+private buildBubbleMap(
     holderData: any,
     gmgnData: any,
     rugcheckData: any,
@@ -2945,10 +3167,10 @@ export class TokenAnalyzerSkill implements Skill {
     const clusters: any[] = [];
     const warnings: string[] = [];
 
-    // ── Cluster detection from holder data ──
+
     const holders = holderData?.topHolders || rugcheckData?.topHolders || [];
     if (holders.length >= 2) {
-      // Group by similar holdings (within 10% of each other) — likely same entity/bundler
+
       const amounts = holders.map((h: any) => ({
         address: h.address,
         pct: h.pct ?? h.percent ?? 0,
@@ -2984,7 +3206,7 @@ export class TokenAnalyzerSkill implements Skill {
         }
       }
 
-      // Detect insider wallets from RugCheck data
+
       const insiders = amounts.filter((a: any) => a.isInsider);
       if (insiders.length > 0) {
         const insiderPct = insiders.reduce((s: number, a: any) => s + a.pct, 0);
@@ -2992,7 +3214,7 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // ── GMGN security signals ──
+
     if (gmgnData && !gmgnData.error) {
       if (gmgnData.bundleRate > 0) warnings.push(`📦 Bundle rate: ${(gmgnData.bundleRate * 100).toFixed(1)}% of supply from bundled buys`);
       if (gmgnData.insiderRate > 0.1) warnings.push(`🕵️ Insider holding: ${(gmgnData.insiderRate * 100).toFixed(1)}%`);
@@ -3002,7 +3224,7 @@ export class TokenAnalyzerSkill implements Skill {
       if (gmgnData.buyTax > 0 || gmgnData.sellTax > 0) warnings.push(`💸 Tax: buy ${gmgnData.buyTax}%, sell ${gmgnData.sellTax}%`);
     }
 
-    // ── RugCheck risk flags ──
+
     if (rugcheckData && !rugcheckData.error) {
       for (const risk of (rugcheckData.risks || [])) {
         if (risk.level === 'danger' || risk.level === 'critical') {
@@ -3013,7 +3235,7 @@ export class TokenAnalyzerSkill implements Skill {
       }
     }
 
-    // ── Summary metrics ──
+
     const top10Pct = gmgnData?.top10HolderRate != null
       ? (gmgnData.top10HolderRate * 100).toFixed(1) + '%'
       : holderData?.top10Percent != null
@@ -3039,29 +3261,28 @@ export class TokenAnalyzerSkill implements Skill {
   }
 
   private async fetchTokenMetadata(mint: string): Promise<TokenInfo | null> {
-    // Check cache first (30s TTL)
+
     const cached = this.metadataCache.get(mint);
     if (cached && cached.expiresAt > Date.now()) return cached.data;
 
     try {
-      const res = await fetch(`https://frontend-api-v3.pump.fun/coins-v2/${mint}`, {
+            const res = await fetch(`https://frontend-api.pump.fun/coins/${mint}`, {
         headers: { 'Origin': 'https://pump.fun', 'Referer': 'https://pump.fun/' },
       });
       if (!res.ok) return null;
       const data = await res.json() as any;
 
-      // Compute bonding curve progress from on-chain reserves
       const realSol = (data.real_sol_reserves || 0) / 1e9;
       const virtualSol = (data.virtual_sol_reserves || 0) / 1e9;
       const virtualTokens = (data.virtual_token_reserves || 0) / 1e6;
-      // Only mark complete if BOTH flags set AND reserves actually confirm graduation (~85 SOL)
+
       const isComplete = !!data.complete && !!data.pool_address && realSol >= 79;
-      // Always compute progress from realSol reserves — most accurate
+
       const bondingCurveProgress = isComplete ? 100 : (realSol > 0 ? Math.min((realSol / 85) * 100, 99.9) : 0);
 
       this.logger.debug(`[fetchTokenMetadata] ${mint.slice(0,8)}.. complete=${data.complete} pool=${!!data.pool_address} realSol=${realSol.toFixed(4)} isComplete=${isComplete} bonding=${bondingCurveProgress.toFixed(2)}% ath=${data.ath_market_cap}`);
 
-      // Compute price from reserves
+
       const price = virtualTokens > 0 ? virtualSol / virtualTokens : 0;
 
       const result = {
@@ -3080,7 +3301,7 @@ export class TokenAnalyzerSkill implements Skill {
         volume24h: 0,
         holders: 0,
         price,
-        // Store extra fields for richer AI context
+
         _extra: {
           realSolReserves: realSol,
           virtualSolReserves: virtualSol,
@@ -3094,7 +3315,7 @@ export class TokenAnalyzerSkill implements Skill {
         },
       } as any;
 
-      // Cache for 30s
+
       this.metadataCache.set(mint, { data: result, expiresAt: Date.now() + 30_000 });
       return result;
     } catch {

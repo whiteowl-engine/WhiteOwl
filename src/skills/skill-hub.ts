@@ -1,16 +1,18 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface,
-} from '../types';
+} from '../types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { fileURLToPath } from 'url';
 
-// ── Hub directories ──
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const HUB_DIR = path.join(__dirname, 'hub');
 const CUSTOM_DIR = path.join(__dirname, 'custom');
 
-// ── Package format ──
 export interface SkillPackage {
   format: 'axiom-skill-v1';
   id: string;
@@ -35,11 +37,10 @@ export interface SkillPackage {
     downloads?: number;
     rating?: number;
   };
-  source: string;     // TypeScript source code
-  checksum: string;    // SHA-256 of source
+  source: string;
+  checksum: string;
 }
 
-// ── Hub index (local registry of known packages) ──
 interface HubEntry {
   id: string;
   name: string;
@@ -55,7 +56,6 @@ interface HubEntry {
   fileName: string;
 }
 
-// ── Forbidden patterns for security ──
 const FORBIDDEN_PATTERNS = [
   'child_process', 'execSync', 'spawnSync', 'exec(', 'spawn(',
   'eval(', 'Function(', 'require(\'fs\')', 'require("fs")',
@@ -172,7 +172,6 @@ export class SkillHubSkill implements Skill {
     this.logger = ctx.logger;
     this.eventBus = ctx.eventBus;
 
-    // Ensure directories exist
     for (const dir of [HUB_DIR, CUSTOM_DIR]) {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -196,14 +195,12 @@ export class SkillHubSkill implements Skill {
 
   async shutdown(): Promise<void> {}
 
-  // ═══════════════════════════════════════════
-  // BROWSE
-  // ═══════════════════════════════════════════
+
   private browse(params: Record<string, any>) {
     const packages = this.loadAllPackages();
     let entries: HubEntry[] = packages.map(pkg => this.toEntry(pkg));
 
-    // Filter by query
+
     if (params.query) {
       const q = String(params.query).toLowerCase();
       entries = entries.filter(e =>
@@ -214,13 +211,13 @@ export class SkillHubSkill implements Skill {
       );
     }
 
-    // Filter by tag
+
     if (params.tag) {
       const tag = String(params.tag).toLowerCase();
       entries = entries.filter(e => e.tags.some(t => t.toLowerCase() === tag));
     }
 
-    // Filter by installed status
+
     if (params.installed === true) entries = entries.filter(e => e.installed);
     if (params.installed === false) entries = entries.filter(e => !e.installed);
 
@@ -230,25 +227,23 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // EXPORT
-  // ═══════════════════════════════════════════
+
   private exportSkill(params: Record<string, any>) {
     const name = this.sanitize(params.skillName);
     if (!name) return { error: 'Invalid skill name' };
 
-    // Read source from custom skills dir
+
     const srcPath = path.join(CUSTOM_DIR, `${name}.ts`);
     if (!fs.existsSync(srcPath)) {
       return { error: `Custom skill "${name}" not found in ${CUSTOM_DIR}. Only custom-created skills can be exported.` };
     }
     const source = fs.readFileSync(srcPath, 'utf-8');
 
-    // Parse manifest from source (extract tools array)
+
     const manifest = this.parseManifestFromSource(source, name);
     if (!manifest) return { error: 'Could not parse skill manifest from source' };
 
-    // Build package
+
     const pkg: SkillPackage = {
       format: 'axiom-skill-v1',
       id: crypto.randomUUID(),
@@ -267,7 +262,7 @@ export class SkillHubSkill implements Skill {
       checksum: crypto.createHash('sha256').update(source).digest('hex'),
     };
 
-    // Save to hub directory AND export file
+
     const pkgFileName = `${name}.axiom-skill`;
     const hubPath = path.join(HUB_DIR, pkgFileName);
     const exportPath = path.join(path.dirname(HUB_DIR), '..', pkgFileName);
@@ -287,14 +282,12 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // IMPORT
-  // ═══════════════════════════════════════════
+
   private importPackage(params: Record<string, any>) {
     const filePath = String(params.filePath || '');
     if (!filePath) return { error: 'File path required' };
 
-    // Validate path is safe (no traversal)
+
     const resolved = path.resolve(filePath);
 
     if (!fs.existsSync(resolved)) return { error: `File not found: ${resolved}` };
@@ -308,17 +301,17 @@ export class SkillHubSkill implements Skill {
       return { error: 'Invalid package file — not valid JSON' };
     }
 
-    // Validate format
+
     if (pkg.format !== 'axiom-skill-v1') return { error: `Unknown package format: ${pkg.format}` };
     if (!pkg.manifest?.name || !pkg.source) return { error: 'Invalid package — missing manifest or source' };
 
-    // Verify checksum
+
     const actualChecksum = crypto.createHash('sha256').update(pkg.source).digest('hex');
     if (pkg.checksum && pkg.checksum !== actualChecksum) {
       return { error: 'Checksum mismatch — package may be corrupted or tampered with' };
     }
 
-    // Security audit
+
     const audit = this.securityAudit(pkg.source);
     if (audit.blocked) {
       return {
@@ -327,7 +320,7 @@ export class SkillHubSkill implements Skill {
       };
     }
 
-    // Copy to hub
+
     const name = this.sanitize(pkg.manifest.name);
     const hubPath = path.join(HUB_DIR, `${name}.axiom-skill`);
     fs.writeFileSync(hubPath, JSON.stringify(pkg, null, 2), 'utf-8');
@@ -344,9 +337,7 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // INSTALL
-  // ═══════════════════════════════════════════
+
   private install(packageId: string) {
     if (!packageId) return { error: 'Package ID required' };
     const pkg = this.findPackageById(packageId);
@@ -354,19 +345,19 @@ export class SkillHubSkill implements Skill {
 
     const name = this.sanitize(pkg.manifest.name);
 
-    // Security re-check before install
+
     const audit = this.securityAudit(pkg.source);
     if (audit.blocked) {
       return { error: 'Security audit FAILED', violations: audit.violations };
     }
 
-    // Check if custom skill already exists
+
     const destPath = path.join(CUSTOM_DIR, `${name}.ts`);
     if (fs.existsSync(destPath)) {
       return { error: `Skill "${name}" already exists in custom skills. Delete it first or choose a different name.` };
     }
 
-    // Write source to custom dir
+
     fs.writeFileSync(destPath, pkg.source, 'utf-8');
     this.logger.info(`[SkillHub] Installed skill "${name}" from hub`);
 
@@ -379,9 +370,7 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // UNINSTALL
-  // ═══════════════════════════════════════════
+
   private uninstall(packageId: string) {
     if (!packageId) return { error: 'Package ID required' };
     const pkg = this.findPackageById(packageId);
@@ -404,9 +393,7 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // INSPECT
-  // ═══════════════════════════════════════════
+
   private inspect(packageId: string) {
     if (!packageId) return { error: 'Package ID required' };
     const pkg = this.findPackageById(packageId);
@@ -440,9 +427,7 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // REMOVE
-  // ═══════════════════════════════════════════
+
   private remove(packageId: string) {
     if (!packageId) return { error: 'Package ID required' };
     const pkg = this.findPackageById(packageId);
@@ -450,19 +435,19 @@ export class SkillHubSkill implements Skill {
 
     const name = this.sanitize(pkg.manifest.name);
 
-    // Uninstall first if installed
+
     const customPath = path.join(CUSTOM_DIR, `${name}.ts`);
     if (fs.existsSync(customPath)) {
       fs.unlinkSync(customPath);
     }
 
-    // Remove from hub
+
     const hubFile = path.join(HUB_DIR, `${name}.axiom-skill`);
     if (fs.existsSync(hubFile)) {
       fs.unlinkSync(hubFile);
     }
 
-    // Also try removing by ID-based filename
+
     const files = fs.readdirSync(HUB_DIR).filter(f => f.endsWith('.axiom-skill'));
     for (const f of files) {
       try {
@@ -471,7 +456,7 @@ export class SkillHubSkill implements Skill {
         if (p.id === packageId) {
           fs.unlinkSync(path.join(HUB_DIR, f));
         }
-      } catch { /* skip */ }
+      } catch {  }
     }
 
     this.logger.info(`[SkillHub] Removed package "${name}" from hub`);
@@ -482,9 +467,7 @@ export class SkillHubSkill implements Skill {
     };
   }
 
-  // ═══════════════════════════════════════════
-  // HELPERS
-  // ═══════════════════════════════════════════
+
   private sanitize(name: string): string {
     return String(name || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 50);
   }
@@ -501,7 +484,7 @@ export class SkillHubSkill implements Skill {
           (pkg as any)._fileName = f;
           packages.push(pkg);
         }
-      } catch { /* skip corrupt files */ }
+      } catch {  }
     }
     return packages;
   }
@@ -540,17 +523,17 @@ export class SkillHubSkill implements Skill {
       }
     }
 
-    // Check for network calls (warn, not block)
+
     if (source.includes('fetch(') || source.includes('http')) {
       warnings.push('Makes network requests (fetch/http)');
     }
 
-    // Check for wallet access
+
     if (source.includes('wallet') || source.includes('privateKey') || source.includes('secretKey')) {
       warnings.push('Accesses wallet/key data — review carefully');
     }
 
-    // Check for financial operations
+
     if (source.includes('riskLevel: \'financial\'') || source.includes('riskLevel: "financial"')) {
       warnings.push('Contains financial-risk tools — requires extra review');
     }
@@ -565,25 +548,24 @@ export class SkillHubSkill implements Skill {
 
   private parseManifestFromSource(source: string, fallbackName: string): SkillPackage['manifest'] | null {
     try {
-      // Try to extract name
+
       const nameMatch = source.match(/name:\s*['"`]([^'"`]+)['"`]/);
       const versionMatch = source.match(/version:\s*['"`]([^'"`]+)['"`]/);
       const descMatch = source.match(/description:\s*['"`]([^'"`]+)['"`]/);
 
-      // Extract tools array — simplified extraction
       const toolsMatch = source.match(/tools:\s*\[([\s\S]*?)\]\s*,?\s*\}/);
       let tools: any[] = [];
       if (toolsMatch) {
-        // Count tool objects by finding name: patterns
+
         const toolNames = source.match(/name:\s*['"`][a-z_]+['"`]/g) || [];
-        // Just count, we'll store tools from the loaded manifest if available
+
       }
 
       return {
         name: nameMatch ? nameMatch[1] : fallbackName,
         version: versionMatch ? versionMatch[1] : '1.0.0',
         description: descMatch ? descMatch[1] : 'Custom skill',
-        tools: [], // Will be populated from the actual running skill if loaded
+        tools: [],
       };
     } catch {
       return {

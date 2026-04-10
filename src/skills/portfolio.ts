@@ -1,7 +1,7 @@
 import {
   Skill, SkillManifest, SkillContext, Position,
   LoggerInterface, EventBusInterface, MemoryInterface,
-} from '../types';
+} from '../types.ts';
 
 export class PortfolioSkill implements Skill {
   manifest: SkillManifest = {
@@ -85,6 +85,20 @@ export class PortfolioSkill implements Skill {
         },
         riskLevel: 'read',
       },
+      {
+        name: 'get_wallet_activity_gmgn',
+        description: 'Parse full trade history (buy/sell activity) for ANY Solana wallet using GMGN.ai API. Returns all transactions with token info, amounts, USD values, PnL per trade, gas fees, and timestamps. Supports pagination (50 trades per page). Use this to analyze any wallet\'s trading patterns.',
+        parameters: {
+          type: 'object',
+          properties: {
+            wallet: { type: 'string', description: 'Solana wallet address to parse trades for' },
+            maxPages: { type: 'number', description: 'Number of pages to fetch (50 trades each, default: 1, max: 20). Set higher to get full history.' },
+            cursor: { type: 'string', description: 'Pagination cursor from previous response (data.next). Leave empty for first page.' },
+          },
+          required: ['wallet'],
+        },
+        riskLevel: 'read',
+      },
     ],
   };
 
@@ -118,7 +132,6 @@ export class PortfolioSkill implements Skill {
       this.positions.delete(mint);
     });
 
-    // Load existing positions on startup
     this.syncPositions();
   }
 
@@ -132,6 +145,7 @@ export class PortfolioSkill implements Skill {
       case 'get_session_report': return this.getSessionReport(params.sessionId);
       case 'check_positions_health': return this.checkPositionsHealth();
       case 'get_best_performers': return this.getBestPerformers(params.period, params.limit);
+      case 'get_wallet_activity_gmgn': return this.getWalletActivityGmgn(params.wallet, params.maxPages, params.cursor);
       default: throw new Error(`Unknown tool: ${tool}`);
     }
   }
@@ -331,7 +345,7 @@ export class PortfolioSkill implements Skill {
   }
 
   private syncPositions(): void {
-    // Reconcile open positions from trade history
+
     const trades = this.memory.getTradeHistory({ limit: 200 });
     const posMap = new Map<string, { bought: number; sold: number; amountSol: number; lastTrade: any }>();
 
@@ -366,6 +380,71 @@ export class PortfolioSkill implements Skill {
           lastUpdated: Date.now(),
         });
       }
+    }
+  }
+
+  private async getWalletActivityGmgn(wallet: string, maxPages?: number, cursor?: string): Promise<any> {
+    if (!wallet || wallet.length < 32) {
+      return { error: 'Valid Solana wallet address required' };
+    }
+    try {
+      const port = process.env.API_PORT || '3377';
+      const pages = Math.min(maxPages || 1, 20);
+      const params = new URLSearchParams({
+        wallet,
+        pages: String(pages),
+        limit: '50',
+      });
+      if (cursor) params.set('cursor', cursor);
+      const resp = await fetch(`http://localhost:${port}/api/wallet/activity?${params.toString()}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json() as any;
+      const activities = data.activities || [];
+
+
+      const trades = activities.map((a: any) => ({
+        type: a.event_type,
+        token: a.token?.symbol || 'Unknown',
+        tokenAddress: a.token?.address || '',
+        tokenAmount: a.token_amount,
+        solAmount: a.quote_amount,
+        costUSD: a.cost_usd,
+        buyCostUSD: a.buy_cost_usd,
+        priceUSD: a.price_usd,
+        pnlUSD: a.event_type === 'sell' && a.buy_cost_usd
+          ? (Number(a.cost_usd || 0) - Number(a.buy_cost_usd || 0)).toFixed(2)
+          : null,
+        timestamp: a.timestamp,
+        date: new Date(a.timestamp * 1000).toISOString(),
+        txHash: a.tx_hash,
+        gasFeeSOL: a.gas_native,
+        dexFeeSOL: a.dex_native,
+        platform: a.launchpad_platform || a.launchpad || '',
+        isOpenOrClose: a.is_open_or_close,
+      }));
+
+      return {
+        wallet,
+        tradeCount: trades.length,
+        next: data.next || null,
+        hasMore: !!data.next,
+        trades,
+        summary: {
+          buys: trades.filter((t: any) => t.type === 'buy').length,
+          sells: trades.filter((t: any) => t.type === 'sell').length,
+          totalBoughtSOL: trades
+            .filter((t: any) => t.type === 'buy')
+            .reduce((s: number, t: any) => s + Number(t.solAmount || 0), 0)
+            .toFixed(4),
+          totalSoldSOL: trades
+            .filter((t: any) => t.type === 'sell')
+            .reduce((s: number, t: any) => s + Number(t.solAmount || 0), 0)
+            .toFixed(4),
+        },
+      };
+    } catch (err: any) {
+      this.logger.warn(`getWalletActivityGmgn failed: ${err.message}`);
+      return { error: `Failed to fetch GMGN activity: ${err.message}` };
     }
   }
 }

@@ -1,16 +1,16 @@
-import { Database } from './sql-compat';
+import { Database } from './sql-compat.ts';
 import {
   MemoryInterface, TradeResult, TradeIntent, SessionStats,
   TokenInfo, TokenSnapshot, TokenAnalysis, HolderData,
-} from '../types';
-import { TradeLog } from './trades';
-import { TokenStore } from './tokens';
+} from '../types.ts';
+import { TradeLog } from './trades.ts';
+import { TokenStore } from './tokens.ts';
 
-export { createDatabase } from './store';
-export { initDatabaseEngine } from './sql-compat';
-export { TradeLog } from './trades';
-export { TokenStore } from './tokens';
-export { ContextualMemory } from './context';
+export { createDatabase } from './store.ts';
+export { initDatabaseEngine } from './sql-compat.ts';
+export { TradeLog } from './trades.ts';
+export { TokenStore } from './tokens.ts';
+export { ContextualMemory } from './context.ts';
 
 export class Memory implements MemoryInterface {
   private tradeLog: TradeLog;
@@ -35,7 +35,6 @@ export class Memory implements MemoryInterface {
     return this.tokenStore;
   }
 
-  // Trade methods
   recordTrade(trade: TradeResult & { intent: TradeIntent }): void {
     this.tradeLog.record(trade, trade.intent);
   }
@@ -56,7 +55,6 @@ export class Memory implements MemoryInterface {
     return this.tradeLog.getStats(since);
   }
 
-  // Token methods
   storeToken(token: TokenInfo): void {
     this.tokenStore.store(token);
   }
@@ -105,7 +103,6 @@ export class Memory implements MemoryInterface {
     return this.tokenStore.isKnownRug(address);
   }
 
-  // Session management
   saveSession(session: {
     id: string;
     mode: string;
@@ -147,18 +144,12 @@ export class Memory implements MemoryInterface {
     }));
   }
 
-  // Cleanup
   cleanOldSnapshots(olderThanMs: number = 7 * 86_400_000): number {
     const cutoff = Date.now() - olderThanMs;
     const result = this.db.prepare('DELETE FROM token_snapshots WHERE timestamp < ?').run(cutoff);
     return result.changes;
   }
 
-  // ===== Pipeline Learning =====
-
-  /**
-   * Record a trade outcome for learning purposes.
-   */
   recordLearningOutcome(data: {
     mint: string;
     signals: string[];
@@ -182,9 +173,6 @@ export class Memory implements MemoryInterface {
     );
   }
 
-  /**
-   * Get aggregated learning data: which signals appear in wins vs losses.
-   */
   getLearningStats(sinceDays: number = 7): {
     winSignals: string[];
     loseSignals: string[];
@@ -215,7 +203,6 @@ export class Memory implements MemoryInterface {
       }
     }
 
-    // Count signal frequency in wins vs losses
     const winSignalFreq = new Map<string, number>();
     const loseSignalFreq = new Map<string, number>();
 
@@ -230,8 +217,6 @@ export class Memory implements MemoryInterface {
       }
     }
 
-    // Signals that appear MORE in wins than losses → reinforce
-    // Signals that appear MORE in losses than wins → penalize
     const winSignals: string[] = [];
     const loseSignals: string[] = [];
 
@@ -254,9 +239,6 @@ export class Memory implements MemoryInterface {
     };
   }
 
-  /**
-   * Save/load pipeline weights to/from SQLite so they persist across restarts.
-   */
   savePipelineWeights(weights: Record<string, number>): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO pipeline_weights (id, socials, bonding_curve, dev_wallet, holders, trending, name_quality, behavioral, updated_at)
@@ -291,11 +273,6 @@ export class Memory implements MemoryInterface {
     this.db.close();
   }
 
-  // ===== AI Memory =====
-
-  /**
-   * Save an AI memory note. Categories: 'token_analysis', 'dev_profile', 'wallet_note', 'market_insight', 'general'
-   */
   saveAIMemory(category: string, content: string, subject?: string, tags?: string[]): number {
     const result = this.db.prepare(`
       INSERT INTO ai_memory (category, subject, content, tags)
@@ -304,9 +281,6 @@ export class Memory implements MemoryInterface {
     return Number(result.lastInsertRowid);
   }
 
-  /**
-   * Search AI memories by keyword across content and subject. Returns most recent first.
-   */
   searchAIMemory(query: string, limit: number = 10): any[] {
     const pattern = `%${query}%`;
     return this.db.prepare(`
@@ -316,10 +290,7 @@ export class Memory implements MemoryInterface {
     `).all(pattern, pattern, pattern, limit) as any[];
   }
 
-  /**
-   * Get AI memories by category, optionally filtered by subject.
-   */
-  getAIMemoryByCategory(category: string, subject?: string, limit: number = 20): any[] {
+getAIMemoryByCategory(category: string, subject?: string, limit: number = 20): any[] {
     if (subject) {
       return this.db.prepare(`
         SELECT id, category, subject, content, tags, created_at FROM ai_memory
@@ -334,30 +305,20 @@ export class Memory implements MemoryInterface {
     `).all(category, limit) as any[];
   }
 
-  /**
-   * Get recent AI memories across all categories.
-   */
-  getRecentAIMemories(limit: number = 15): any[] {
+getRecentAIMemories(limit: number = 15): any[] {
     return this.db.prepare(`
       SELECT id, category, subject, content, tags, created_at FROM ai_memory
       ORDER BY created_at DESC LIMIT ?
     `).all(limit) as any[];
   }
 
-  /**
-   * Delete an AI memory by id.
-   */
-  deleteAIMemory(id: number): boolean {
+deleteAIMemory(id: number): boolean {
     const result = this.db.prepare('DELETE FROM ai_memory WHERE id = ?').run(id);
     return result.changes > 0;
   }
 
-  // ===== Token Pattern Uniqualizer =====
 
-  /**
-   * Store a token's fingerprint for pattern matching.
-   */
-  storeTokenPattern(pattern: {
+storeTokenPattern(pattern: {
     mint: string;
     dev?: string;
     name?: string;
@@ -394,10 +355,7 @@ export class Memory implements MemoryInterface {
     );
   }
 
-  /**
-   * Find tokens with the same dev address (excluding the queried mint).
-   */
-  findPatternsByDev(dev: string, excludeMint?: string): any[] {
+findPatternsByDev(dev: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE dev = ? AND mint != ? ORDER BY created_at DESC'
@@ -408,10 +366,7 @@ export class Memory implements MemoryInterface {
     ).all(dev) as any[];
   }
 
-  /**
-   * Find tokens with the same Twitter handle.
-   */
-  findPatternsByTwitter(handle: string, excludeMint?: string): any[] {
+findPatternsByTwitter(handle: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE twitter_handle = ? AND mint != ? ORDER BY created_at DESC'
@@ -422,10 +377,7 @@ export class Memory implements MemoryInterface {
     ).all(handle) as any[];
   }
 
-  /**
-   * Find tokens with the same Telegram group.
-   */
-  findPatternsByTelegram(handle: string, excludeMint?: string): any[] {
+findPatternsByTelegram(handle: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE telegram_handle = ? AND mint != ? ORDER BY created_at DESC'
@@ -436,10 +388,7 @@ export class Memory implements MemoryInterface {
     ).all(handle) as any[];
   }
 
-  /**
-   * Find tokens with the same website domain.
-   */
-  findPatternsByWebsite(domain: string, excludeMint?: string): any[] {
+findPatternsByWebsite(domain: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE website_domain = ? AND mint != ? ORDER BY created_at DESC'
@@ -450,10 +399,7 @@ export class Memory implements MemoryInterface {
     ).all(domain) as any[];
   }
 
-  /**
-   * Find tokens with the same website content hash (template detection).
-   */
-  findPatternsByContentHash(hash: string, excludeMint?: string): any[] {
+findPatternsByContentHash(hash: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE website_content_hash = ? AND mint != ? ORDER BY created_at DESC'
@@ -464,10 +410,7 @@ export class Memory implements MemoryInterface {
     ).all(hash) as any[];
   }
 
-  /**
-   * Find tokens with the same name pattern (e.g. "Baby *", "* Inu").
-   */
-  findPatternsByNamePattern(pattern: string, excludeMint?: string): any[] {
+findPatternsByNamePattern(pattern: string, excludeMint?: string): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT * FROM token_patterns WHERE name_pattern = ? AND mint != ? ORDER BY created_at DESC'
@@ -478,10 +421,7 @@ export class Memory implements MemoryInterface {
     ).all(pattern) as any[];
   }
 
-  /**
-   * Find tokens with similar description (word overlap). Returns all patterns for comparison.
-   */
-  getAllPatternsWithDescriptions(excludeMint?: string, limit: number = 500): any[] {
+getAllPatternsWithDescriptions(excludeMint?: string, limit: number = 500): any[] {
     if (excludeMint) {
       return this.db.prepare(
         'SELECT mint, name, symbol, dev, description_words, score, rug_score, outcome, created_at FROM token_patterns WHERE description_words IS NOT NULL AND mint != ? ORDER BY created_at DESC LIMIT ?'
@@ -492,19 +432,13 @@ export class Memory implements MemoryInterface {
     ).all(limit) as any[];
   }
 
-  /**
-   * Update the outcome of a token pattern (win/loss/rug) after trading.
-   */
-  updatePatternOutcome(mint: string, outcome: string): void {
+updatePatternOutcome(mint: string, outcome: string): void {
     this.db.prepare(
       'UPDATE token_patterns SET outcome = ? WHERE mint = ?'
     ).run(outcome, mint);
   }
 
-  /**
-   * Get pattern stats: how many tokens matched certain patterns and their outcomes.
-   */
-  getPatternStats(): {
+getPatternStats(): {
     totalPatterns: number;
     devRepeatRate: number;
     avgScoreRepeaters: number;
@@ -512,43 +446,43 @@ export class Memory implements MemoryInterface {
     outcomeByRepeat: { repeaters: { win: number; loss: number; rug: number }; unique: { win: number; loss: number; rug: number } };
   } {
     const total = (this.db.prepare('SELECT COUNT(*) as cnt FROM token_patterns').get() as any)?.cnt || 0;
-    
-    // Dev repeat: devs who launched more than 1 token
+
+
     const devRepeats = this.db.prepare(`
       SELECT dev, COUNT(*) as cnt, AVG(score) as avg_score
       FROM token_patterns WHERE dev IS NOT NULL
       GROUP BY dev HAVING cnt > 1
     `).all() as any[];
-    
+
     const repeaterMints = new Set<string>();
     for (const d of devRepeats) {
       const mints = this.db.prepare('SELECT mint FROM token_patterns WHERE dev = ?').all(d.dev) as any[];
       for (const m of mints) repeaterMints.add(m.mint);
     }
-    
+
     const allWithOutcome = this.db.prepare(
       'SELECT mint, score, outcome FROM token_patterns WHERE outcome IS NOT NULL'
     ).all() as any[];
-    
+
     const outcomeByRepeat = {
       repeaters: { win: 0, loss: 0, rug: 0 },
       unique: { win: 0, loss: 0, rug: 0 },
     };
     let repeaterScoreSum = 0, repeaterCount = 0;
     let uniqueScoreSum = 0, uniqueCount = 0;
-    
+
     for (const row of allWithOutcome) {
       const bucket = repeaterMints.has(row.mint) ? 'repeaters' : 'unique';
       if (row.outcome === 'win') outcomeByRepeat[bucket].win++;
       else if (row.outcome === 'loss') outcomeByRepeat[bucket].loss++;
       else if (row.outcome === 'rug') outcomeByRepeat[bucket].rug++;
     }
-    
+
     for (const row of this.db.prepare('SELECT mint, score FROM token_patterns WHERE score IS NOT NULL').all() as any[]) {
       if (repeaterMints.has(row.mint)) { repeaterScoreSum += row.score; repeaterCount++; }
       else { uniqueScoreSum += row.score; uniqueCount++; }
     }
-    
+
     return {
       totalPatterns: total,
       devRepeatRate: total > 0 ? repeaterMints.size / total : 0,

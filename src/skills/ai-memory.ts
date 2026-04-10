@@ -1,7 +1,7 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, MemoryInterface,
-} from '../types';
+} from '../types.ts';
 
 export class AIMemorySkill implements Skill {
   manifest: SkillManifest = {

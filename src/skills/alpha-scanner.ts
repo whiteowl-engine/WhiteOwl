@@ -2,24 +2,9 @@ import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface,
   LLMProvider, LLMMessage,
-} from '../types';
-import { createLLMProvider } from '../llm';
+} from '../types.ts';
+import { createLLMProvider } from '../llm/index.ts';
 
-/**
- * AlphaScannerSkill — Social intelligence → auto-snipe.
- *
- * TWO MODES:
- * A) CA Extraction — finds contract addresses in social messages → auto-buy
- * B) Narrative Sniping — reads news, extracts SEMANTIC MEANING via LLM,
- *    then watches for the FIRST token on pump.fun matching that narrative.
- *    Example: news "Trump hospitalized" → hot keywords ["trump", "hospital",
- *    "sick", "rip"] → first token named "TRUMP SICK" or "RIP TRUMP" → instant buy
- *
- * Sources: Telegram channels, Twitter/X, secondary sites (pump.fun, DexScreener)
- * Flow: Source → extract CA/narrative → dedupe → emit signal:buy or narrative:hot → pipeline
- */
-
-// Solana address regex: base58, 32-44 characters
 const SOLANA_ADDRESS_RE = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const PUMP_FUN_URL_RE = /pump\.fun\/(?:coin\/)?([1-9A-HJ-NP-Za-km-z]{32,44})/g;
 const TICKER_RE = /\$([A-Za-z][A-Za-z0-9]{1,9})\b/g;
@@ -28,13 +13,13 @@ interface AlphaSource {
   id: string;
   type: 'telegram' | 'twitter' | 'website';
   name: string;
-  /** Telegram: channel username. Twitter: account handle or search query. Website: URL */
+
   target: string;
   enabled: boolean;
   pollIntervalMs: number;
-  /** Auto-buy when CA found from this source */
+
   autoBuy: boolean;
-  /** Minimum confidence to trigger auto-buy (0-1) */
+
   minConfidence: number;
 }
 
@@ -47,7 +32,6 @@ interface ExtractedAlpha {
   confidence: number;
 }
 
-/** Hot narrative extracted from news — used for semantic token matching */
 interface HotNarrative {
   id: string;
   keywords: string[];
@@ -58,7 +42,7 @@ interface HotNarrative {
   expiresAt: number;
   autoBuy: boolean;
   buyAmountSol: number;
-  /** Tokens already bought for this narrative (prevent double-buy) */
+
   matchedMints: Set<string>;
   maxBuys: number;
 }
@@ -205,15 +189,12 @@ export class AlphaScannerSkill implements Skill {
   private timers: Map<string, ReturnType<typeof setInterval>> = new Map();
   private running = false;
 
-  /** Recently found alphas (ring buffer, max 500) */
   private recentAlphas: ExtractedAlpha[] = [];
   private readonly MAX_RECENT = 500;
 
-  /** Dedup: track mints we've already processed */
   private seenMints: Set<string> = new Set();
   private readonly MAX_SEEN = 5000;
 
-  /** Stats */
   private stats = {
     totalScans: 0,
     totalTokensFound: 0,
@@ -223,14 +204,10 @@ export class AlphaScannerSkill implements Skill {
     bySource: new Map<string, { scans: number; found: number; autoBuys: number }>(),
   };
 
-  // ==========================================
-  // Narrative Sniping Engine
-  // ==========================================
-  /** Active hot narratives — keywords extracted from breaking news */
   private narratives: Map<string, HotNarrative> = new Map();
-  /** LLM for auto-extracting narratives from news text */
+
   private llmProvider: LLMProvider | null = null;
-  /** Narrative cleanup timer */
+
   private narrativeCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   async initialize(ctx: SkillContext): Promise<void> {
@@ -238,27 +215,16 @@ export class AlphaScannerSkill implements Skill {
     this.logger = ctx.logger;
     this.eventBus = ctx.eventBus;
 
-    // Listen for new tokens → check against hot narratives
     this.eventBus.on('token:new', (data) => {
       this.checkNarrativeMatch(data.mint, data.name, data.symbol);
     });
 
-    // Periodic cleanup of expired narratives
     this.narrativeCleanupTimer = setInterval(() => this.cleanExpiredNarratives(), 60_000);
 
-    // Add default sources — pump.fun trending + dexscreener
     this.addSource({
       type: 'website',
       name: 'pump.fun Frontend',
       target: 'https://frontend-api-v2.pump.fun/coins/featured',
-      autoBuy: false,
-      minConfidence: 0.5,
-      pollIntervalMs: 30_000,
-    });
-    this.addSource({
-      type: 'website',
-      name: 'DexScreener Trending',
-      target: 'https://api.dexscreener.com/token-boosts/top/v1',
       autoBuy: false,
       minConfidence: 0.5,
       pollIntervalMs: 30_000,
@@ -299,9 +265,6 @@ export class AlphaScannerSkill implements Skill {
     }
   }
 
-  // ==========================================
-  // Source Management
-  // ==========================================
 
   private addSource(params: {
     type: AlphaSource['type'];
@@ -326,7 +289,7 @@ export class AlphaScannerSkill implements Skill {
     this.sources.set(id, source);
     this.stats.bySource.set(id, { scans: 0, found: 0, autoBuys: 0 });
 
-    // If already running, start polling this source
+
     if (this.running) {
       this.startSourcePolling(source);
     }
@@ -354,9 +317,6 @@ export class AlphaScannerSkill implements Skill {
     return { sources };
   }
 
-  // ==========================================
-  // Scanning Engine
-  // ==========================================
 
   private startScanning(): { status: string; sources: number } {
     if (this.running) return { status: 'already_running', sources: this.sources.size };
@@ -383,10 +343,10 @@ export class AlphaScannerSkill implements Skill {
   }
 
   private startSourcePolling(source: AlphaSource): void {
-    // Initial scan
+
     this.pollSource(source);
 
-    // Periodic polling
+
     const timer = setInterval(() => {
       this.pollSource(source);
     }, source.pollIntervalMs);
@@ -416,9 +376,6 @@ export class AlphaScannerSkill implements Skill {
     return { scanned, found };
   }
 
-  // ==========================================
-  // Source-specific Polling
-  // ==========================================
 
   private async pollSource(source: AlphaSource): Promise<ExtractedAlpha[]> {
     try {
@@ -447,7 +404,7 @@ export class AlphaScannerSkill implements Skill {
           break;
       }
 
-      // Dedupe and process
+
       const newAlphas = alphas.filter(a => !this.seenMints.has(a.mint));
       for (const alpha of newAlphas) {
         this.trackSeen(alpha.mint);
@@ -456,7 +413,7 @@ export class AlphaScannerSkill implements Skill {
         if (sourceStats) sourceStats.found++;
         this.stats.totalTokensFound++;
 
-        // Emit to pipeline
+
         this.eventBus.emit('token:new', {
           mint: alpha.mint,
           name: alpha.ticker || alpha.mint.slice(0, 8),
@@ -465,7 +422,7 @@ export class AlphaScannerSkill implements Skill {
           timestamp: Date.now(),
         });
 
-        // Auto-buy if configured
+
         if (source.autoBuy && alpha.confidence >= source.minConfidence) {
           this.eventBus.emit('signal:buy', {
             mint: alpha.mint,
@@ -481,9 +438,9 @@ export class AlphaScannerSkill implements Skill {
         }
       }
 
-      // LLM narrative extraction — analyze news text for semantic meaning
+
       if (this.llmProvider && alphas.length === 0) {
-        // No CAs found → this might be a pure news message → extract narrative
+
         await this.tryExtractNarrative(rawTexts, source);
       }
 
@@ -498,19 +455,8 @@ export class AlphaScannerSkill implements Skill {
     }
   }
 
-  // ==========================================
-  // Telegram Polling
-  // ==========================================
 
-  /**
-   * Poll Telegram channel for new messages with CAs.
-   *
-   * Uses Telegram Bot API (requires TELEGRAM_BOT_TOKEN env).
-   * Bot must be added to the target channel as a member.
-   *
-   * If no bot token — falls back to public Telegram web preview scraping.
-   */
-  private async pollTelegram(source: AlphaSource): Promise<{ alphas: ExtractedAlpha[]; texts: string[] }> {
+private async pollTelegram(source: AlphaSource): Promise<{ alphas: ExtractedAlpha[]; texts: string[] }> {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (botToken) {
       return this.pollTelegramBot(source, botToken);
@@ -521,7 +467,7 @@ export class AlphaScannerSkill implements Skill {
   private async pollTelegramBot(source: AlphaSource, botToken: string): Promise<{ alphas: ExtractedAlpha[]; texts: string[] }> {
     try {
       const res = await fetch(
-        `https://api.telegram.org/bot${botToken}/getUpdates?limit=50&timeout=0`,
+        `https://api.telegram.org/bot${botToken}/getUpdates?limit=20&timeout=5`,
         { signal: AbortSignal.timeout(10_000) }
       );
 
@@ -588,18 +534,8 @@ export class AlphaScannerSkill implements Skill {
     }
   }
 
-  // ==========================================
-  // Twitter Polling
-  // ==========================================
 
-  /**
-   * Poll Twitter for token mentions.
-   *
-   * Strategy:
-   * 1. If TWITTER_BEARER_TOKEN set → use Twitter API v2 search
-   * 2. Fallback → scrape via Nitter instances or RSSHub
-   */
-  private async pollTwitter(source: AlphaSource): Promise<{ alphas: ExtractedAlpha[]; texts: string[] }> {
+private async pollTwitter(source: AlphaSource): Promise<{ alphas: ExtractedAlpha[]; texts: string[] }> {
     const bearerToken = process.env.TWITTER_BEARER_TOKEN;
     if (bearerToken) {
       return this.pollTwitterAPI(source, bearerToken);
@@ -611,7 +547,7 @@ export class AlphaScannerSkill implements Skill {
     try {
       const query = encodeURIComponent(`${source.target} pump.fun OR solana`);
       const res = await fetch(
-        `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=20&tweet.fields=created_at,text`,
+        `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=10&tweet.fields=created_at,author_id,public_metrics`,
         {
           headers: { 'Authorization': `Bearer ${bearerToken}` },
           signal: AbortSignal.timeout(10_000),
@@ -677,10 +613,6 @@ export class AlphaScannerSkill implements Skill {
     return { alphas: [], texts: [] };
   }
 
-  // ==========================================
-  // Website Polling
-  // ==========================================
-
   private async pollWebsite(source: AlphaSource): Promise<ExtractedAlpha[]> {
     try {
       const res = await fetch(source.target, {
@@ -699,7 +631,6 @@ export class AlphaScannerSkill implements Skill {
         return this.parseJsonResponse(await res.json(), source);
       }
 
-      // HTML — extract CAs from page text
       const html = await res.text();
       const text = html.replace(/<[^>]+>/g, ' ');
       return this.extractFromText(text, source);
@@ -713,11 +644,10 @@ export class AlphaScannerSkill implements Skill {
     const items = Array.isArray(data) ? data : (data.data || data.coins || data.tokens || data.pairs || []);
 
     for (const item of items.slice(0, 50)) {
-      // Try common field names for mint address
+
       const mint = item.mint || item.tokenAddress || item.address || item.baseToken?.address;
       if (!mint || typeof mint !== 'string') continue;
 
-      // Validate it looks like a Solana address
       if (mint.length < 32 || mint.length > 44) continue;
 
       const ticker = item.symbol || item.name || item.baseToken?.symbol;
@@ -736,15 +666,10 @@ export class AlphaScannerSkill implements Skill {
     return alphas;
   }
 
-  // ==========================================
-  // Text Extraction Engine
-  // ==========================================
-
   private extractFromText(text: string, source: AlphaSource): ExtractedAlpha[] {
     const alphas: ExtractedAlpha[] = [];
     const foundMints = new Set<string>();
 
-    // 1. Extract pump.fun URLs (highest confidence)
     PUMP_FUN_URL_RE.lastIndex = 0;
     let match;
     while ((match = PUMP_FUN_URL_RE.exec(text)) !== null) {
@@ -756,12 +681,11 @@ export class AlphaScannerSkill implements Skill {
           source,
           rawText: text.slice(Math.max(0, match.index - 30), match.index + match[0].length + 30),
           extractedAt: Date.now(),
-          confidence: 0.9, // pump.fun URL is very high confidence
+          confidence: 0.9,
         });
       }
     }
 
-    // 2. Extract raw Solana addresses
     SOLANA_ADDRESS_RE.lastIndex = 0;
     while ((match = SOLANA_ADDRESS_RE.exec(text)) !== null) {
       const mint = match[0];
@@ -777,26 +701,20 @@ export class AlphaScannerSkill implements Skill {
       }
     }
 
-    // 3. Extract $TICKER mentions (lower confidence — need pipeline to resolve)
     TICKER_RE.lastIndex = 0;
     while ((match = TICKER_RE.exec(text)) !== null) {
-      // We can't convert ticker to mint here, but we store it for context
-      // The AI Commander can later resolve tickers to mints via DexScreener
+
     }
 
     return alphas;
   }
 
-  /**
-   * Additional validation that a string is a real Solana address.
-   * Filters out common false positives (hex strings, UUIDs, etc.)
-   */
   private looksLikeSolanaAddress(addr: string): boolean {
-    // Must be 32-44 chars
+
     if (addr.length < 32 || addr.length > 44) return false;
-    // Must not be all-lowercase or all-uppercase (base58 has mixed case)
+
     if (addr === addr.toLowerCase() || addr === addr.toUpperCase()) return false;
-    // Must not contain 0, O, I, l (not in base58)
+
     if (/[0OIl]/.test(addr)) return false;
     return true;
   }
@@ -804,27 +722,20 @@ export class AlphaScannerSkill implements Skill {
   private estimateConfidence(item: any, source: AlphaSource): number {
     let confidence = 0.5;
 
-    // Boost for social presence
     if (item.twitter || item.socials?.length > 0) confidence += 0.1;
     if (item.website || item.websites?.length > 0) confidence += 0.1;
 
-    // Boost for volume/activity
     if (item.volume?.h24 > 10_000) confidence += 0.1;
     if (item.txns?.h24?.buys > 50) confidence += 0.1;
 
-    // Boost for boosts (DexScreener)
     if (item.amount > 0 || item.totalAmount > 0) confidence += 0.15;
 
     return Math.min(confidence, 1.0);
   }
 
-  // ==========================================
-  // Helpers
-  // ==========================================
-
   private trackSeen(mint: string): void {
     this.seenMints.add(mint);
-    // Evict oldest when exceeding limit
+
     if (this.seenMints.size > this.MAX_SEEN) {
       const first = this.seenMints.values().next().value;
       if (first) this.seenMints.delete(first);
@@ -875,16 +786,6 @@ export class AlphaScannerSkill implements Skill {
     };
   }
 
-  // ==========================================
-  // Narrative Sniping Engine
-  //
-  // Reads breaking news → LLM extracts semantic keywords →
-  // when pump.fun token matches keywords by name → instant buy.
-  //
-  // Example: "Trump hospitalized" → ["trump", "hospital", "sick", "rip"]
-  // → first token named "TRUMP HOSPITAL" or "$RIPTRUMP" → auto-buy
-  // ==========================================
-
   private addNarrative(params: {
     keywords: string[];
     summary: string;
@@ -912,8 +813,6 @@ export class AlphaScannerSkill implements Skill {
 
     this.narratives.set(id, narrative);
 
-    // Push keywords to pipeline as trend boosts
-    this.pushNarrativeKeywordsToPipeline();
 
     this.logger.info(`Narrative added: "${params.summary}" → [${narrative.keywords.join(', ')}] (TTL: ${params.ttlMinutes ?? 60}min)`);
     return {
@@ -929,7 +828,6 @@ export class AlphaScannerSkill implements Skill {
 
   private removeNarrative(id: string): { status: string } {
     this.narratives.delete(id);
-    this.pushNarrativeKeywordsToPipeline();
     return { status: 'removed' };
   }
 
@@ -958,23 +856,19 @@ export class AlphaScannerSkill implements Skill {
     return { status: 'configured' };
   }
 
-  /**
-   * Check if a new token's name/symbol matches any active hot narrative.
-   * This is called on every token:new event — must be fast.
-   */
-  private checkNarrativeMatch(mint: string, name: string, symbol: string): void {
+private checkNarrativeMatch(mint: string, name: string, symbol: string): void {
     if (this.narratives.size === 0) return;
 
     const nameLower = name.toLowerCase();
     const symLower = symbol.toLowerCase();
 
     for (const narrative of this.narratives.values()) {
-      // Skip expired or maxed-out narratives
+
       if (Date.now() > narrative.expiresAt) continue;
       if (narrative.matchedMints.size >= narrative.maxBuys) continue;
       if (narrative.matchedMints.has(mint)) continue;
 
-      // Check if token name/symbol contains any narrative keyword
+
       let matchCount = 0;
       const matched: string[] = [];
       for (const kw of narrative.keywords) {
@@ -984,7 +878,7 @@ export class AlphaScannerSkill implements Skill {
         }
       }
 
-      // Require at least 1 keyword match (for short keywords require 2+)
+
       const minMatches = narrative.keywords.some(k => k.length <= 3) ? 2 : 1;
       if (matchCount < minMatches) continue;
 
@@ -1007,14 +901,10 @@ export class AlphaScannerSkill implements Skill {
     }
   }
 
-  /**
-   * Try to extract a hot narrative from news text using LLM.
-   * Called when social sources contain text but no CAs — indicates pure news.
-   */
-  private async tryExtractNarrative(texts: string[], source: AlphaSource): Promise<void> {
+private async tryExtractNarrative(texts: string[], source: AlphaSource): Promise<void> {
     if (!this.llmProvider || texts.length === 0) return;
 
-    // Combine recent texts, limit size
+
     const combined = texts.slice(-5).join('\n---\n').slice(0, 2000);
     if (combined.length < 20) return;
 
@@ -1043,14 +933,14 @@ Or if no narrative: {"narrative": "", "keywords": []}`,
       const response = await this.llmProvider.chat(messages);
       const content = response.content.trim();
 
-      // Parse JSON response
+
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return;
 
       const parsed = JSON.parse(jsonMatch[0]);
       if (!parsed.narrative || !parsed.keywords?.length) return;
 
-      // Auto-add as hot narrative
+
       this.addNarrative({
         keywords: parsed.keywords,
         summary: parsed.narrative,
@@ -1067,20 +957,7 @@ Or if no narrative: {"narrative": "", "keywords": []}`,
     }
   }
 
-  /** Push all active narrative keywords to pipeline as trend boosts */
-  private pushNarrativeKeywordsToPipeline(): void {
-    const allKeywords: string[] = [];
-    for (const narrative of this.narratives.values()) {
-      if (Date.now() < narrative.expiresAt) {
-        allKeywords.push(...narrative.keywords);
-      }
-    }
-    // Emit narrative:hot event for pipeline to pick up
-    this.eventBus.emit('narrative:hot' as any, { keywords: allKeywords });
-  }
-
-  /** Remove expired narratives */
-  private cleanExpiredNarratives(): void {
+private cleanExpiredNarratives(): void {
     const now = Date.now();
     for (const [id, narrative] of this.narratives) {
       if (now > narrative.expiresAt) {

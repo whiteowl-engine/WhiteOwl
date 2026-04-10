@@ -1,40 +1,44 @@
-import { PumpMonitorSkill } from './pump-monitor';
-import { TokenAnalyzerSkill } from './token-analyzer';
-import { PumpTraderSkill } from './pump-trader';
-import { PortfolioSkill } from './portfolio';
-import { WalletTrackerSkill } from './wallet-tracker';
-import { SocialMonitorSkill } from './social-monitor';
-import { DexScreenerSkill } from './dex-screener';
-import { CopyTradeSkill } from './copy-trade';
-import { FastSniperSkill } from './fast-sniper';
-import { TrendSniperSkill } from './trend-sniper';
-import { AlphaScannerSkill } from './alpha-scanner';
-import { AdvancedTraderSkill } from './advanced-trader';
-import { TokenSecuritySkill } from './token-security';
-import { CurveAnalyzerSkill } from './curve-analyzer';
-import { ExitOptimizerSkill } from './exit-optimizer';
-import { HolderIntelligenceSkill } from './holder-intelligence';
-import { VolumeDetectorSkill } from './volume-detector';
-import { BlockchainSkill } from './blockchain';
-import { AIMemorySkill } from './ai-memory';
-import { WebSearchSkill } from './web-search';
-import { SkillBuilderSkill } from './skill-builder';
-import { SkillHubSkill } from './skill-hub';
-import { ProjectsSkill } from './projects';
-import { Skill } from '../types';
+import { PumpMonitorSkill } from './pump-monitor.ts';
+import { TokenAnalyzerSkill } from './token-analyzer.ts';
+import { ShitTraderSkill } from './shit-trader.ts';
+import { PortfolioSkill } from './portfolio.ts';
+import { WalletTrackerSkill } from './wallet-tracker.ts';
+import { SocialMonitorSkill } from './social-monitor.ts';
+import { GmgnSkill } from './gmgn.ts';
+import { CopyTradeSkill } from './copy-trade.ts';
+import { AlphaScannerSkill } from './alpha-scanner.ts';
+import { AdvancedTraderSkill } from './advanced-trader.ts';
+import { TokenSecuritySkill } from './token-security.ts';
+import { CurveAnalyzerSkill } from './curve-analyzer.ts';
+import { ExitOptimizerSkill } from './exit-optimizer.ts';
+import { HolderIntelligenceSkill } from './holder-intelligence.ts';
+import { VolumeDetectorSkill } from './volume-detector.ts';
+import { BlockchainSkill } from './blockchain.ts';
+import { AIMemorySkill } from './ai-memory.ts';
+import { WebSearchSkill } from './web-search.ts';
+import { SkillBuilderSkill } from './skill-builder.ts';
+import { SkillHubSkill } from './skill-hub.ts';
+import { ProjectsSkill } from './projects.ts';
+import { WebIntelSkill } from './web-intel.ts';
+import { ScreenshotSkill } from './screenshot.ts';
+import { BrowserEyeSkill } from './browser-eye.ts';
+import { InsightXSkill } from './insightx.ts';
+import { TerminalSkill } from './terminal.ts';
+import { BackgroundJobsSkill } from './background-jobs.ts';
+import { NewsSearchSkill } from './news-search.ts';
+import { AxiomApiSkill } from './axiom-api.ts';
+import { Skill } from '../types.ts';
 
 export function getAllSkills(): Skill[] {
   return [
     new PumpMonitorSkill(),
     new TokenAnalyzerSkill(),
-    new PumpTraderSkill(),
+    new ShitTraderSkill(),
     new PortfolioSkill(),
     new WalletTrackerSkill(),
     new SocialMonitorSkill(),
-    new DexScreenerSkill(),
+    new GmgnSkill(),
     new CopyTradeSkill(),
-    new FastSniperSkill(),
-    new TrendSniperSkill(),
     new AlphaScannerSkill(),
     new AdvancedTraderSkill(),
     new TokenSecuritySkill(),
@@ -48,20 +52,26 @@ export function getAllSkills(): Skill[] {
     new SkillBuilderSkill(),
     new SkillHubSkill(),
     new ProjectsSkill(),
+    new WebIntelSkill(),
+    new ScreenshotSkill(),
+    new BrowserEyeSkill(),
+    new InsightXSkill(),
+    new TerminalSkill(),
+    new BackgroundJobsSkill(),
+    new NewsSearchSkill(),
+    new AxiomApiSkill(),
   ];
 }
 
 export {
   PumpMonitorSkill,
   TokenAnalyzerSkill,
-  PumpTraderSkill,
+  ShitTraderSkill,
   PortfolioSkill,
   WalletTrackerSkill,
   SocialMonitorSkill,
-  DexScreenerSkill,
+  GmgnSkill,
   CopyTradeSkill,
-  FastSniperSkill,
-  TrendSniperSkill,
   AlphaScannerSkill,
   AdvancedTraderSkill,
   TokenSecuritySkill,
@@ -75,4 +85,9 @@ export {
   SkillBuilderSkill,
   SkillHubSkill,
   ProjectsSkill,
+  WebIntelSkill,
+  BrowserEyeSkill,
+  InsightXSkill,
+  TerminalSkill,
+  AxiomApiSkill,
 };

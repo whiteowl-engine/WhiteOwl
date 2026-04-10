@@ -1,18 +1,4 @@
-import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types';
-
-// =====================================================
-// Token Security Auditor
-//
-// Performs critical on-chain security checks BEFORE purchase:
-// - Mint Authority (revoked? → safe / active? → rug risk)
-// - Freeze Authority (active? → can freeze your balance)
-// - LP lock detection (pump.fun AMM pool locked? Duration?)
-// - Metadata mutability (can dev change name/description?)
-// - Supply analysis (hidden inflation risk)
-//
-// Integration: Pipeline Stage 3 calls checkSecurity()
-// to add security signals before trade decision.
-// =====================================================
+import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types.ts';
 
 interface SecurityAudit {
   mint: string;
@@ -25,7 +11,7 @@ interface SecurityAudit {
   lpLockDurationDays: number;
   totalSupply: number;
   decimals: number;
-  securityScore: number; // 0-100 (higher = safer)
+  securityScore: number;
   flags: string[];
   checkedAt: number;
 }
@@ -104,7 +90,7 @@ export class TokenSecuritySkill implements Skill {
   private solanaRpc = '';
   private heliusKey = '';
   private cache = new Map<string, SecurityCache>();
-  private readonly CACHE_TTL = 5 * 60_000; // 5 minutes
+  private readonly CACHE_TTL = 5 * 60_000;
   private readonly MAX_CACHE = 5_000;
 
   private stats = {
@@ -140,15 +126,8 @@ export class TokenSecuritySkill implements Skill {
     this.cache.clear();
   }
 
-  // =====================================================
-  // Public API for Pipeline integration
-  // =====================================================
 
-  /**
-   * Quick security check for pipeline Stage 3.
-   * Returns security score 0-100 and flag list.
-   */
-  async quickCheck(mint: string): Promise<{ score: number; flags: string[] }> {
+async quickCheck(mint: string): Promise<{ score: number; flags: string[] }> {
     const cached = this.getCached(mint);
     if (cached) {
       this.stats.cacheHits++;
@@ -163,9 +142,6 @@ export class TokenSecuritySkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Core security checks
-  // =====================================================
 
   private async fullSecurityCheck(mint: string): Promise<SecurityAudit> {
     const cached = this.getCached(mint);
@@ -178,9 +154,9 @@ export class TokenSecuritySkill implements Skill {
 
     const rpcUrl = this.getRpcUrl();
     const flags: string[] = [];
-    let securityScore = 100; // Start safe, deduct for issues
+    let securityScore = 100;
 
-    // 1. Fetch mint account info (contains authority data)
+
     const mintInfo = await this.fetchMintInfo(rpcUrl, mint);
     if (!mintInfo) {
       return this.buildAudit(mint, {
@@ -189,7 +165,7 @@ export class TokenSecuritySkill implements Skill {
       });
     }
 
-    // 2. Check Mint Authority
+
     const mintAuthorityRevoked = mintInfo.mintAuthority === null;
     const mintAuthority = mintInfo.mintAuthority;
     if (!mintAuthorityRevoked) {
@@ -198,7 +174,7 @@ export class TokenSecuritySkill implements Skill {
       this.stats.mintAuthorityActive++;
     }
 
-    // 3. Check Freeze Authority
+
     const freezeAuthorityRevoked = mintInfo.freezeAuthority === null;
     const freezeAuthority = mintInfo.freezeAuthority;
     if (!freezeAuthorityRevoked) {
@@ -207,7 +183,7 @@ export class TokenSecuritySkill implements Skill {
       this.stats.freezeAuthorityActive++;
     }
 
-    // 4. Check metadata mutability (via Metaplex)
+
     let metadataMutable = false;
     try {
       metadataMutable = await this.checkMetadataMutability(rpcUrl, mint);
@@ -217,10 +193,10 @@ export class TokenSecuritySkill implements Skill {
         this.stats.metadataMutable++;
       }
     } catch {
-      // Non-critical, skip
+
     }
 
-    // 5. Check LP lock (only relevant for graduated tokens)
+
     let lpLocked = false;
     let lpLockDurationDays = 0;
     try {
@@ -228,21 +204,21 @@ export class TokenSecuritySkill implements Skill {
       lpLocked = lpResult.locked;
       lpLockDurationDays = lpResult.durationDays;
       if (lpLocked) {
-        securityScore += 10; // Bonus for locked LP
+        securityScore += 10;
         flags.push(`lp_locked_${lpLockDurationDays}d`);
         this.stats.lpLocked++;
       }
     } catch {
-      // Token may not be graduated yet
+
     }
 
-    // 6. Supply analysis
+
     const totalSupply = mintInfo.supply;
     const decimals = mintInfo.decimals;
 
     securityScore = Math.max(0, Math.min(100, securityScore));
 
-    // Update running average
+
     this.stats.avgSecurityScore =
       (this.stats.avgSecurityScore * (this.stats.totalChecks - 1) + securityScore) / this.stats.totalChecks;
 
@@ -264,7 +240,7 @@ export class TokenSecuritySkill implements Skill {
 
     this.setCache(mint, audit);
 
-    // Emit rug signal if very unsafe
+
     if (securityScore < 30) {
       this.eventBus.emit('signal:rug', {
         mint,
@@ -331,7 +307,7 @@ export class TokenSecuritySkill implements Skill {
 
   private async batchCheck(mints: string[]): Promise<SecurityAudit[]> {
     const results: SecurityAudit[] = [];
-    // Process in batches of 5 to avoid rate limits
+
     const batchSize = 5;
     for (let i = 0; i < mints.length; i += batchSize) {
       const batch = mints.slice(i, i + batchSize);
@@ -349,9 +325,6 @@ export class TokenSecuritySkill implements Skill {
     return { ...this.stats, cacheSize: this.cache.size };
   }
 
-  // =====================================================
-  // RPC helpers
-  // =====================================================
 
   private async fetchMintInfo(rpcUrl: string, mint: string): Promise<{
     mintAuthority: string | null;
@@ -361,7 +334,7 @@ export class TokenSecuritySkill implements Skill {
   } | null> {
     try {
       const res = await fetch(rpcUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,
@@ -387,16 +360,15 @@ export class TokenSecuritySkill implements Skill {
   }
 
   private async checkMetadataMutability(rpcUrl: string, mint: string): Promise<boolean> {
-    // Metaplex Metadata PDA: seeds = ["metadata", metadataProgramId, mint]
-    // Program ID: metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
+
+
     const METADATA_PROGRAM = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
 
     try {
-      // Use getAccountInfo on Metadata PDA
-      // The isMutable flag is at byte offset 290+ in the account data
-      // For simplicity, we use getProgramAccounts filtered by mint
+
+
       const res = await fetch(rpcUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,
@@ -406,8 +378,8 @@ export class TokenSecuritySkill implements Skill {
             {
               encoding: 'base64',
               filters: [
-                // memcmp filter on the mint pubkey inside metadata account
-                // mint is at offset 33 in Metadata V1 layout
+
+
                 { memcmp: { offset: 33, bytes: mint } },
               ],
               dataSlice: { offset: 0, length: 350 },
@@ -424,27 +396,22 @@ export class TokenSecuritySkill implements Skill {
       const accountData = accounts[0]?.account?.data?.[0];
       if (!accountData) return false;
 
-      // Decode base64 and check isMutable flag
-      // In Metaplex Metadata V1, isMutable is a boolean at end of core fields
+
       const buffer = Buffer.from(accountData, 'base64');
-      // isMutable is typically around offset 308-310 area depending on name/symbol/uri lengths
-      // A simple heuristic: check last few bytes in the core section
-      // The actual position varies, so we look for the pattern
+
+
       if (buffer.length > 300) {
-        // Metadata struct: key(1) + updateAuth(32) + mint(32) + name(36) + symbol(14) + uri(204) + fees(2) + ...
-        // After uri: sellerFeeBasisPoints(2) + hasCreators(1) + creatorsVec(...) + primarySaleHappened(1) + isMutable(1)
-        // Approximate offset for isMutable: 1+32+32+36+14+204+2 = 321 + creators
-        // Simplified: read byte at offset after the URI and creators
-        // Since exact offset varies with creators, scan backwards from reasonable bounds
+
+
         for (let offset = Math.min(buffer.length - 1, 350); offset >= 300; offset--) {
-          // isMutable is either 0 or 1, and comes before a potential 0x00 padding
+
           if (buffer[offset] === 1 || buffer[offset] === 0) {
             return buffer[offset] === 1;
           }
         }
       }
 
-      return false; // Assume immutable if can't determine
+      return false;
     } catch {
       return false;
     }
@@ -456,53 +423,26 @@ export class TokenSecuritySkill implements Skill {
     durationDays: number;
     platform: string | null;
   }> {
-    // Check if token has graduated by checking for pool on any DEX
+
     try {
-      // Query DexScreener for pair info
-      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
-        headers: { 'Accept': 'application/json' },
+
+            const res = await fetch(`https://gmgn.ai/defi/quotation/v1/tokens/sol/${encodeURIComponent(mint)}`, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', 'Referer': 'https://gmgn.ai/', 'Origin': 'https://gmgn.ai' },
       });
 
       if (!res.ok) return { graduated: false, locked: false, durationDays: 0, platform: null };
 
-      const data = await res.json() as any;
-      const pairs = data?.pairs || [];
+      const json = await res.json() as any;
+      const t = json?.data?.token;
 
-      if (pairs.length === 0) {
+      if (!t || !t.pool_address) {
         return { graduated: false, locked: false, durationDays: 0, platform: null };
       }
 
-      // Check if there's a pump.fun AMM, Raydium, or other DEX pair
-      const dexPair = pairs.find((p: any) =>
-        p.dexId === 'pumpfun' || p.dexId === 'raydium' || p.dexId === 'orca' || p.dexId === 'meteora'
-      );
+      const liquidity = t.liquidity || 0;
+      const launchpad = t.launchpad || '';
 
-      if (!dexPair) {
-        return { graduated: false, locked: false, durationDays: 0, platform: null };
-      }
-
-      // Check liquidity lock via known locker programs
-      // pump.fun graduated tokens have LP auto-locked in their own AMM
-      const liquidity = dexPair.liquidity?.usd || 0;
-      const lpBurned = dexPair.info?.lpBurned || false;
-
-      // If LP tokens are burned, they're permanently locked
-      if (lpBurned) {
-        return {
-          graduated: true,
-          locked: true,
-          durationDays: 9999, // Permanent
-          platform: 'burned',
-        };
-      }
-
-      // pump.fun tokens that graduate have their LP auto-migrated
-      // and LP tokens are usually burned as part of the migration
-      const isPumpGraduated = pairs.some((p: any) =>
-        p.labels?.includes('pump.fun') || p.url?.includes('pump.fun')
-      );
-
-      if (isPumpGraduated && liquidity > 0) {
+      if (launchpad === 'pump.fun' && liquidity > 0) {
         return {
           graduated: true,
           locked: true,
@@ -522,10 +462,6 @@ export class TokenSecuritySkill implements Skill {
     }
   }
 
-  // =====================================================
-  // Cache management
-  // =====================================================
-
   private getCached(mint: string): SecurityAudit | null {
     const entry = this.cache.get(mint);
     if (!entry) return null;
@@ -538,7 +474,7 @@ export class TokenSecuritySkill implements Skill {
 
   private setCache(mint: string, audit: SecurityAudit): void {
     if (this.cache.size >= this.MAX_CACHE) {
-      // Evict oldest 20%
+
       const toDelete = Math.floor(this.MAX_CACHE * 0.2);
       const iter = this.cache.keys();
       for (let i = 0; i < toDelete; i++) {

@@ -1,11 +1,9 @@
-// CRX3 Chrome Extension packager for AXIOM
-// Builds a signed .crx from extension files — no external dependencies
+
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 
-// ═══════ CRC32 (for ZIP) ═══════
 const crcT = new Uint32Array(256);
 for (let i = 0; i < 256; i++) {
   let c = i;
@@ -18,7 +16,6 @@ function crc32(buf: Buffer): number {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-// ═══════ Minimal ZIP builder ═══════
 function createZip(files: { name: string; data: Buffer }[]): Buffer {
   const entries: { nameB: Buffer; raw: Buffer; comp: Buffer; crc: number; method: number; offset: number }[] = [];
   const parts: Buffer[] = [];
@@ -33,17 +30,17 @@ function createZip(files: { name: string; data: Buffer }[]): Buffer {
     const method = useDeflate ? 8 : 0;
 
     const lfh = Buffer.alloc(30);
-    lfh.writeUInt32LE(0x04034b50, 0);  // local file header sig
-    lfh.writeUInt16LE(20, 4);           // version needed
-    lfh.writeUInt16LE(0, 6);            // flags
-    lfh.writeUInt16LE(method, 8);       // compression
-    lfh.writeUInt16LE(0, 10);           // mod time
-    lfh.writeUInt16LE(0, 12);           // mod date
-    lfh.writeUInt32LE(crcV, 14);        // crc32
-    lfh.writeUInt32LE(comp.length, 18); // compressed size
-    lfh.writeUInt32LE(f.data.length, 22); // uncompressed size
-    lfh.writeUInt16LE(nameB.length, 26);  // filename length
-    lfh.writeUInt16LE(0, 28);             // extra field length
+    lfh.writeUInt32LE(0x04034b50, 0);
+    lfh.writeUInt16LE(20, 4);
+    lfh.writeUInt16LE(0, 6);
+    lfh.writeUInt16LE(method, 8);
+    lfh.writeUInt16LE(0, 10);
+    lfh.writeUInt16LE(0, 12);
+    lfh.writeUInt32LE(crcV, 14);
+    lfh.writeUInt32LE(comp.length, 18);
+    lfh.writeUInt32LE(f.data.length, 22);
+    lfh.writeUInt16LE(nameB.length, 26);
+    lfh.writeUInt16LE(0, 28);
 
     entries.push({ nameB, raw: f.data, comp, crc: crcV, method, offset });
     parts.push(lfh, nameB, comp);
@@ -53,43 +50,42 @@ function createZip(files: { name: string; data: Buffer }[]): Buffer {
   const cdStart = offset;
   for (const e of entries) {
     const cdr = Buffer.alloc(46);
-    cdr.writeUInt32LE(0x02014b50, 0);   // central dir sig
-    cdr.writeUInt16LE(20, 4);            // version made by
-    cdr.writeUInt16LE(20, 6);            // version needed
-    cdr.writeUInt16LE(0, 8);             // flags
-    cdr.writeUInt16LE(e.method, 10);     // compression
-    cdr.writeUInt16LE(0, 12);            // mod time
-    cdr.writeUInt16LE(0, 14);            // mod date
-    cdr.writeUInt32LE(e.crc, 16);        // crc32
-    cdr.writeUInt32LE(e.comp.length, 20); // compressed size
-    cdr.writeUInt32LE(e.raw.length, 24);  // uncompressed size
-    cdr.writeUInt16LE(e.nameB.length, 28); // filename length
-    cdr.writeUInt16LE(0, 30);            // extra field length
-    cdr.writeUInt16LE(0, 32);            // comment length
-    cdr.writeUInt16LE(0, 34);            // disk number
-    cdr.writeUInt16LE(0, 36);            // internal attrs
-    cdr.writeUInt32LE(0, 38);            // external attrs
-    cdr.writeUInt32LE(e.offset, 42);     // local header offset
+    cdr.writeUInt32LE(0x02014b50, 0);
+    cdr.writeUInt16LE(20, 4);
+    cdr.writeUInt16LE(20, 6);
+    cdr.writeUInt16LE(0, 8);
+    cdr.writeUInt16LE(e.method, 10);
+    cdr.writeUInt16LE(0, 12);
+    cdr.writeUInt16LE(0, 14);
+    cdr.writeUInt32LE(e.crc, 16);
+    cdr.writeUInt32LE(e.comp.length, 20);
+    cdr.writeUInt32LE(e.raw.length, 24);
+    cdr.writeUInt16LE(e.nameB.length, 28);
+    cdr.writeUInt16LE(0, 30);
+    cdr.writeUInt16LE(0, 32);
+    cdr.writeUInt16LE(0, 34);
+    cdr.writeUInt16LE(0, 36);
+    cdr.writeUInt32LE(0, 38);
+    cdr.writeUInt32LE(e.offset, 42);
     parts.push(cdr, e.nameB);
     offset += 46 + e.nameB.length;
   }
 
   const cdSize = offset - cdStart;
   const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);       // end of central dir sig
-  eocd.writeUInt16LE(0, 4);                // disk number
-  eocd.writeUInt16LE(0, 6);                // disk with CD
-  eocd.writeUInt16LE(entries.length, 8);   // entries on disk
-  eocd.writeUInt16LE(entries.length, 10);  // total entries
-  eocd.writeUInt32LE(cdSize, 12);          // CD size
-  eocd.writeUInt32LE(cdStart, 16);         // CD offset
-  eocd.writeUInt16LE(0, 20);              // comment length
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdSize, 12);
+  eocd.writeUInt32LE(cdStart, 16);
+  eocd.writeUInt16LE(0, 20);
   parts.push(eocd);
 
   return Buffer.concat(parts);
 }
 
-// ═══════ Protobuf varint + length-delimited field encoder ═══════
 function varint(value: number): Buffer {
   const bytes: number[] = [];
   let v = value >>> 0;
@@ -102,7 +98,6 @@ function pbField(fieldNum: number, data: Buffer): Buffer {
   return Buffer.concat([varint((fieldNum << 3) | 2), varint(data.length), data]);
 }
 
-// ═══════ RSA Key management (generated once, persisted) ═══════
 export function getOrCreateKey(keyPath: string): { privateKey: crypto.KeyObject; publicKeyDer: Buffer } {
   if (fs.existsSync(keyPath)) {
     const pem = fs.readFileSync(keyPath, 'utf-8');
@@ -116,8 +111,6 @@ export function getOrCreateKey(keyPath: string): { privateKey: crypto.KeyObject;
   return { privateKey: pair.privateKey, publicKeyDer: der };
 }
 
-// ═══════ Extension ID from public key (Chrome's algorithm) ═══════
-// SHA-256 of DER public key → first 16 bytes → each nibble mapped to a-p
 export function computeExtensionId(publicKeyDer: Buffer): string {
   const hash = crypto.createHash('sha256').update(publicKeyDer).digest();
   let id = '';
@@ -128,16 +121,12 @@ export function computeExtensionId(publicKeyDer: Buffer): string {
   return id;
 }
 
-// ═══════ Build CRX3 ═══════
-// Format: "Cr24" + version(3) + header_size + CrxFileHeader(protobuf) + ZIP
 function buildCRX3(zipData: Buffer, privateKey: crypto.KeyObject, publicKeyDer: Buffer): Buffer {
-  // crx_id = first 16 bytes of SHA-256(public_key)
+
   const crxId = crypto.createHash('sha256').update(publicKeyDer).digest().subarray(0, 16);
 
-  // SignedData protobuf: { bytes crx_id = 1; }
   const signedHeaderData = pbField(1, crxId);
 
-  // Signature payload: "CRX3 SignedData\0" + LE32(signedHeaderData.length) + signedHeaderData + zipData
   const shdLen = Buffer.alloc(4);
   shdLen.writeUInt32LE(signedHeaderData.length);
   const signPayload = Buffer.concat([
@@ -149,19 +138,16 @@ function buildCRX3(zipData: Buffer, privateKey: crypto.KeyObject, publicKeyDer: 
 
   const signature = crypto.sign('sha256', signPayload, privateKey);
 
-  // AsymmetricKeyProof { bytes public_key = 1; bytes signature = 2; }
   const keyProof = Buffer.concat([
     pbField(1, publicKeyDer),
     pbField(2, signature),
   ]);
 
-  // CrxFileHeader { repeated AsymmetricKeyProof sha256_with_rsa = 2; bytes signed_header_data = 10000; }
   const header = Buffer.concat([
     pbField(2, keyProof),
     pbField(10000, signedHeaderData),
   ]);
 
-  // CRX3 envelope
   const envelope = Buffer.alloc(12);
   envelope.write('Cr24', 0);
   envelope.writeUInt32LE(3, 4);
@@ -170,7 +156,6 @@ function buildCRX3(zipData: Buffer, privateKey: crypto.KeyObject, publicKeyDer: 
   return Buffer.concat([envelope, header, zipData]);
 }
 
-// ═══════ Main: Build complete CRX package from extension directory ═══════
 export function buildExtensionPackage(
   extensionDir: string,
   keyPath: string,
@@ -180,32 +165,69 @@ export function buildExtensionPackage(
   const extensionId = computeExtensionId(publicKeyDer);
   const version = '1.0.0';
 
-  // Custom manifest for CRX (world: MAIN bypasses page CSP for content scripts)
+  const matchPatterns = [
+    'https://pump.fun/*', 'https://www.pump.fun/*',
+    'https://dexscreener.com/*', 'https://www.dexscreener.com/*',
+    'https://birdeye.so/*', 'https://www.birdeye.so/*',
+    'https://jup.ag/*', 'https://www.jup.ag/*',
+    'https://raydium.io/*', 'https://www.raydium.io/*',
+    'https://solscan.io/*', 'https://www.solscan.io/*',
+    'https://solana.fm/*', 'https://www.solana.fm/*',
+    'https://www.defined.fi/*',
+    'https://www.tensor.trade/*',
+    'https://www.coingecko.com/*',
+    'https://x.com/*', 'https://twitter.com/*',
+    'https://photon-sol.tinyastro.io/*',
+  ];
   const manifest = JSON.stringify({
     manifest_version: 3,
-    name: 'AXIOM — AI Trading Agent',
+    name: 'WhiteOwl — AI Trading Overlay',
     version,
-    description: 'AI trading overlay for pump.fun',
+    description: 'WhiteOwl AI overlay: element inspector, trading tools, and real-time analysis on crypto sites',
     permissions: ['activeTab'],
-    host_permissions: ['https://pump.fun/*', 'https://www.pump.fun/*'],
-    content_scripts: [{
-      matches: ['https://pump.fun/*', 'https://www.pump.fun/*'],
-      js: ['content.js'],
-      run_at: 'document_idle',
-      world: 'MAIN',
-    }],
+    host_permissions: ['http://localhost:3377/*', ...matchPatterns],
+    background: { service_worker: 'background.js' },
+    content_scripts: [
+      {
+        matches: matchPatterns,
+        js: ['content.js'],
+        run_at: 'document_idle',
+        world: 'MAIN',
+      },
+      {
+        matches: matchPatterns,
+        js: ['bridge.js'],
+        run_at: 'document_idle',
+        world: 'ISOLATED',
+      },
+    ],
     icons: { '48': 'icon48.png', '128': 'icon128.png' },
   }, null, 2);
 
-  // content.js = full inject.js with CSS inlined and host replaced
   const cssRaw = fs.readFileSync(path.join(extensionDir, 'overlay.css'), 'utf-8');
   const cssEscaped = cssRaw.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
   let injectCode = fs.readFileSync(path.join(extensionDir, 'inject.js'), 'utf-8');
   injectCode = injectCode.replace(/__AXIOM_CSS__/g, cssEscaped).replace(/__AXIOM_HOST__/g, serverOrigin);
 
+  const bridgeCode = `window.addEventListener('message', (e) => {
+  if (e.source !== window || !e.data || e.data.type !== 'wo-fetch-req') return;
+  const { id, url, method, headers, body } = e.data;
+  chrome.runtime.sendMessage({ type: 'wo-fetch', url, method, headers, body }, (resp) => {
+    if (chrome.runtime.lastError) {
+      window.postMessage({ type: 'wo-fetch-res', id, ok: false, body: chrome.runtime.lastError.message }, '*');
+      return;
+    }
+    window.postMessage({ type: 'wo-fetch-res', id, ok: resp && resp.ok, status: resp && resp.status, body: resp && resp.body }, '*');
+  });
+});`;
+
+  const bgCode = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf-8');
+
   const files: { name: string; data: Buffer }[] = [
     { name: 'manifest.json', data: Buffer.from(manifest) },
     { name: 'content.js', data: Buffer.from(injectCode) },
+    { name: 'bridge.js', data: Buffer.from(bridgeCode) },
+    { name: 'background.js', data: Buffer.from(bgCode) },
   ];
 
   for (const icon of ['icon48.png', 'icon128.png']) {

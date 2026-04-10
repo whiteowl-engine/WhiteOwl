@@ -3,44 +3,29 @@ import {
   EventBusInterface,
   LoggerInterface,
   AgentRiskLimits,
-} from '../types';
-
-// =====================================================
-// AutoApprove — Configurable auto-approval for trade intents
-// =====================================================
-//
-// Like Copilot's auto-approve for tool calls:
-// - "off"         → Every trade needs manual approval
-// - "conservative"→ Auto-approve only reads + sells (profit-taking)
-// - "moderate"    → Auto-approve buys within safe thresholds
-// - "aggressive"  → Auto-approve everything within risk limits
-// - "full"        → Auto-approve ALL (like autopilot, no RiskManager gate)
-//
-// Each level has configurable thresholds. The system integrates with
-// RiskManager: AutoApprove decides WHETHER to auto-approve, then
-// RiskManager still validates limits (position size, daily loss, etc.)
+} from '../types.ts';
 
 export type AutoApproveLevel = 'off' | 'conservative' | 'moderate' | 'aggressive' | 'full';
 
 export interface AutoApproveRule {
   action: 'buy' | 'sell' | '*';
-  maxAmountSol?: number;          // Max SOL per auto-approved trade
-  maxSlippageBps?: number;        // Max slippage to auto-approve
-  requireRiskCheck: boolean;      // Still run through RiskManager?
-  requireSecurityCheck?: boolean; // Require token-security audit pass?
-  maxOpenPositions?: number;      // Don't auto-approve if >= N open
-  cooldownMs?: number;            // Min time between auto-approvals
-  allowedAgents?: string[];       // Only auto-approve from these agents
-  blockedMints?: string[];        // Never auto-approve these tokens
+  maxAmountSol?: number;
+  maxSlippageBps?: number;
+  requireRiskCheck: boolean;
+  requireSecurityCheck?: boolean;
+  maxOpenPositions?: number;
+  cooldownMs?: number;
+  allowedAgents?: string[];
+  blockedMints?: string[];
 }
 
 export interface AutoApproveConfig {
   level: AutoApproveLevel;
   rules: AutoApproveRule[];
-  globalMaxDailyAutoApproved: number;  // Max auto-approved trades per day
-  globalMaxAutoApprovedSol: number;    // Max total SOL auto-approved per day
-  notifyOnAutoApprove: boolean;        // Emit notification events
-  logAll: boolean;                     // Log every decision to audit trail
+  globalMaxDailyAutoApproved: number;
+  globalMaxAutoApprovedSol: number;
+  notifyOnAutoApprove: boolean;
+  logAll: boolean;
 }
 
 interface AutoApproveState {
@@ -61,10 +46,6 @@ interface AuditEntry {
   reason: string;
   level: AutoApproveLevel;
 }
-
-// =====================================================
-// Preset configurations for each auto-approve level
-// =====================================================
 
 const PRESETS: Record<AutoApproveLevel, AutoApproveConfig> = {
   off: {
@@ -136,7 +117,7 @@ const PRESETS: Record<AutoApproveLevel, AutoApproveConfig> = {
     rules: [
       {
         action: '*',
-        requireRiskCheck: true,  // Still validate risk limits
+        requireRiskCheck: true,
       },
     ],
     globalMaxDailyAutoApproved: 999,
@@ -153,10 +134,8 @@ export class AutoApproveManager {
   private logger: LoggerInterface;
   private openPositionCount = 0;
 
-  // Pluggable security check callback
   private securityChecker?: (mint: string) => Promise<{ passed: boolean; score: number }>;
 
-  // Pluggable risk check callback (from RiskManager)
   private riskChecker?: (intent: TradeIntent) => { approved: boolean; reason?: string };
 
   constructor(
@@ -178,10 +157,6 @@ export class AutoApproveManager {
     this.bindEvents();
   }
 
-  // =====================================================
-  // Core: evaluate trade intent
-  // =====================================================
-
   async evaluate(intent: TradeIntent): Promise<{
     autoApproved: boolean;
     requiresManual: boolean;
@@ -189,13 +164,11 @@ export class AutoApproveManager {
   }> {
     this.resetDayIfNeeded();
 
-    // Level: off → always manual
     if (this.config.level === 'off') {
       this.audit(intent, 'pending_manual', 'Auto-approve is OFF');
       return { autoApproved: false, requiresManual: true, reason: 'Auto-approve disabled' };
     }
 
-    // Global daily limits
     if (this.state.dailyAutoApproved >= this.config.globalMaxDailyAutoApproved) {
       this.audit(intent, 'pending_manual', 'Daily auto-approve count limit reached');
       return { autoApproved: false, requiresManual: true, reason: 'Daily auto-approve limit reached' };
@@ -207,7 +180,6 @@ export class AutoApproveManager {
       return { autoApproved: false, requiresManual: true, reason: 'Daily SOL auto-approve limit' };
     }
 
-    // Find matching rule
     const rule = this.config.rules.find(r =>
       r.action === '*' || r.action === intent.action
     );
@@ -217,7 +189,6 @@ export class AutoApproveManager {
       return { autoApproved: false, requiresManual: true, reason: 'No matching rule' };
     }
 
-    // Rule checks
     if (rule.maxAmountSol !== undefined && amount > rule.maxAmountSol) {
       this.audit(intent, 'pending_manual', `Amount ${amount} > max ${rule.maxAmountSol}`);
       return { autoApproved: false, requiresManual: true, reason: `Amount exceeds auto-approve limit (${rule.maxAmountSol} SOL)` };
@@ -251,7 +222,7 @@ export class AutoApproveManager {
       return { autoApproved: false, requiresManual: false, reason: 'Token is blocked from auto-approve' };
     }
 
-    // Security check (if required and checker is available)
+
     if (rule.requireSecurityCheck && this.securityChecker && intent.action === 'buy') {
       const security = await this.securityChecker(intent.mint);
       if (!security.passed) {
@@ -260,7 +231,7 @@ export class AutoApproveManager {
       }
     }
 
-    // Risk check (still validates position size, daily loss, etc.)
+
     if (rule.requireRiskCheck && this.riskChecker) {
       const riskResult = this.riskChecker(intent);
       if (!riskResult.approved) {
@@ -269,7 +240,7 @@ export class AutoApproveManager {
       }
     }
 
-    // All checks passed → auto-approve
+
     this.state.dailyAutoApproved++;
     this.state.dailyAutoApprovedSol += amount;
     this.state.lastAutoApproveAt = Date.now();
@@ -284,9 +255,6 @@ export class AutoApproveManager {
     return { autoApproved: true, requiresManual: false, reason: `Auto-approved (${this.config.level})` };
   }
 
-  // =====================================================
-  // Configuration
-  // =====================================================
 
   setLevel(level: AutoApproveLevel): void {
     this.config = { ...PRESETS[level] };
@@ -313,9 +281,6 @@ export class AutoApproveManager {
     this.riskChecker = checker;
   }
 
-  // =====================================================
-  // Status & audit
-  // =====================================================
 
   getStatus(): {
     level: AutoApproveLevel;
@@ -343,9 +308,6 @@ export class AutoApproveManager {
     return this.state.auditTrail.slice(-limit);
   }
 
-  // =====================================================
-  // Internal
-  // =====================================================
 
   private bindEvents(): void {
     this.eventBus.on('position:opened', () => { this.openPositionCount++; });
@@ -366,7 +328,7 @@ export class AutoApproveManager {
 
     this.state.auditTrail.push(entry);
 
-    // Keep audit trail bounded
+
     if (this.state.auditTrail.length > 500) {
       this.state.auditTrail = this.state.auditTrail.slice(-300);
     }

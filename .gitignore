@@ -1,23 +1,27 @@
 node_modules/
 dist/
 data/
+.venv/
+
 *.db
 *.db-journal
 *.db.backups/
+
 .env
 .env.*
-*.log
+!.env.example
 *.pem
 *.key
 cookies.json
 auth-sessions.json
 twitter-cookies.json
 
-# Temp/backup files
-_js_temp.txt
+*.log
+logs.txt
+
 *.bak
-*_js.txt
-js-portion.txt
-js_temp.txt
-new-card.txt
-new-css.txt
+screenshot-*.png
+
+.DS_Store
+Thumbs.db
+.vscode/

@@ -1,9 +1,13 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface,
-} from '../types';
+} from '../types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const CUSTOM_DIR = path.join(__dirname, 'custom');
 
@@ -113,7 +117,6 @@ export class SkillBuilderSkill implements Skill {
 
   async shutdown(): Promise<void> {}
 
-  // ── Helpers ──
 
   private sanitizeName(name: string): string {
     return name.replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 50);
@@ -138,7 +141,7 @@ export class SkillBuilderSkill implements Skill {
     const execLogic = params.executeLogic || 'return { error: "Not implemented" };';
     const initLogic = params.initializeLogic || '';
 
-    // Validate: no dangerous imports/operations in the logic
+
     const forbidden = ['child_process', 'exec(', 'execSync', 'spawn(', 'eval(', 'Function('];
     for (const f of forbidden) {
       if (execLogic.includes(f) || initLogic.includes(f)) {
@@ -146,12 +149,12 @@ export class SkillBuilderSkill implements Skill {
       }
     }
 
-    const source = `// Auto-generated custom skill: ${name}
-// Created by WhiteOwl Skill Builder
+    const source = `
+
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface, MemoryInterface,
-} from '../../types';
+} from '../../types.ts';
 
 export class ${className} implements Skill {
   manifest: SkillManifest = {

@@ -1,20 +1,8 @@
 import {
   EventBusInterface, MemoryInterface, LoggerInterface,
-  TokenInfo, Position, SessionStats, TokenAnalysis,
-} from '../types';
-
-/**
- * MarketStateBuilder — aggregates real-time data into a compact
- * context document for AI consumption.
- *
- * Instead of feeding raw events one-by-one to the LLM,
- * this class maintains a continuously updated "market snapshot"
- * that the AI receives as context every decision cycle.
- *
- * This solves the key problem: LLM calls take 1-5 seconds,
- * but tokens appear every second. The AI doesn't need to see
- * EVERY token — it needs a summary of what's happening RIGHT NOW.
- */
+  TokenInfo, Position, SessionStats, TokenAnalysis, NewsItem,
+} from '../types.ts';
+import { NewsStore } from '../memory/news-store.ts';
 
 interface RecentToken {
   mint: string;
@@ -88,11 +76,12 @@ export class MarketStateBuilder {
   private pipelineStats: PipelineSnapshot | null = null;
   private sessionStats: SessionStats | null = null;
   private trendingTickers: string[] = [];
+  private newsStore: NewsStore | null = null;
 
   private readonly MAX_RECENT_TOKENS = 50;
   private readonly MAX_RECENT_TRADES = 20;
   private readonly MAX_RECENT_SIGNALS = 30;
-  private readonly TOKEN_TTL_MS = 60_000; // Keep tokens for 60 seconds
+  private readonly TOKEN_TTL_MS = 60_000;
 
   constructor(opts: {
     eventBus: EventBusInterface;
@@ -105,8 +94,12 @@ export class MarketStateBuilder {
     this.bind();
   }
 
+  setNewsStore(store: NewsStore): void {
+    this.newsStore = store;
+  }
+
   private bind(): void {
-    // Capture new tokens
+
     this.eventBus.on('token:new', (data) => {
       const token = this.memory.getToken(data.mint);
       this.recentTokens.push({
@@ -120,15 +113,13 @@ export class MarketStateBuilder {
         receivedAt: Date.now(),
       });
 
-      // Trim
       if (this.recentTokens.length > this.MAX_RECENT_TOKENS) {
         this.recentTokens = this.recentTokens.slice(-this.MAX_RECENT_TOKENS);
       }
     });
 
-    // Capture trades
     this.eventBus.on('trade:executed', (result) => {
-      // Find matching intent from event history
+
       const intentHistory = this.eventBus.history('trade:intent', 20);
       const intent = intentHistory.find(e => e.data?.id === result.intentId);
 
@@ -146,7 +137,6 @@ export class MarketStateBuilder {
       }
     });
 
-    // Capture signals
     this.eventBus.on('signal:buy', (data) => {
       this.recentSignals.push({
         type: 'buy', mint: data.mint, score: data.score,
@@ -163,38 +153,28 @@ export class MarketStateBuilder {
       this.trimSignals();
     });
 
-    // Track positions
     this.eventBus.on('position:opened', (pos) => this.positions.set(pos.mint, pos));
     this.eventBus.on('position:updated', (pos) => this.positions.set(pos.mint, pos));
     this.eventBus.on('position:closed', ({ mint }) => this.positions.delete(mint));
   }
 
-  /** Call from runtime to update balance periodically */
   updateBalance(sol: number): void {
     this.walletBalance = sol;
   }
 
-  /** Call from pipeline to update its stats */
   updatePipelineStats(stats: PipelineSnapshot): void {
     this.pipelineStats = stats;
   }
 
-  /** Call from session management */
   updateSessionStats(stats: SessionStats): void {
     this.sessionStats = stats;
   }
 
-  /**
-   * Build the current market state — ready for AI consumption.
-   * Called before each AI decision cycle.
-   */
   getState(): MarketState {
     const now = Date.now();
 
-    // Evict stale tokens
     this.recentTokens = this.recentTokens.filter(t => now - t.receivedAt < this.TOKEN_TTL_MS);
 
-    // Build positions array
     const posArray = Array.from(this.positions.values()).map(p => {
       const pnlPercent = p.entryPrice > 0
         ? ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100
@@ -222,31 +202,26 @@ export class MarketStateBuilder {
     };
   }
 
-  /**
-   * Build a compact text summary for the AI's system/user message.
-   * Designed to provide maximum signal in minimum tokens.
-   */
   buildPromptContext(): string {
     const state = this.getState();
     const parts: string[] = [];
 
-    // Market overview
     parts.push(`[MARKET STATE ${new Date(state.timestamp).toISOString()}]`);
     parts.push(`Wallet: ${state.walletBalance.toFixed(3)} SOL`);
 
-    // Pipeline stats
+
     if (state.pipelineStats?.enabled) {
       const p = state.pipelineStats;
       parts.push(`Pipeline: ${p.tokensPerSec.toFixed(1)} tkn/s | received=${p.totalReceived} | pass=${p.passRate} | trades=${p.tradesEmitted} | workers=${p.workerUtilization} | cache=${p.cacheHitRate}`);
     }
 
-    // Session stats
+
     if (state.sessionStats) {
       const s = state.sessionStats;
       parts.push(`Session: ${s.tradesExecuted} trades (${s.tradesWon}W/${s.tradesLost}L) | P&L: ${s.totalPnlSol >= 0 ? '+' : ''}${s.totalPnlSol.toFixed(3)} SOL | scanned: ${s.tokensScanned}`);
     }
 
-    // Open positions
+
     if (state.positions.length > 0) {
       parts.push(`\n[POSITIONS (${state.positions.length})]`);
       for (const p of state.positions) {
@@ -255,7 +230,7 @@ export class MarketStateBuilder {
       }
     }
 
-    // Recent tokens (last 30 seconds, compact)
+
     const recentTokens = state.recentTokens
       .filter(t => Date.now() - t.receivedAt < 30_000)
       .slice(-15);
@@ -269,7 +244,7 @@ export class MarketStateBuilder {
       }
     }
 
-    // Recent signals
+
     if (state.recentSignals.length > 0) {
       parts.push(`\n[SIGNALS (${state.recentSignals.length})]`);
       for (const s of state.recentSignals.slice(-5)) {
@@ -277,7 +252,7 @@ export class MarketStateBuilder {
       }
     }
 
-    // Recent trades
+
     if (state.recentTrades.length > 0) {
       parts.push(`\n[RECENT TRADES (${state.recentTrades.length})]`);
       for (const t of state.recentTrades.slice(-5)) {
@@ -285,7 +260,70 @@ export class MarketStateBuilder {
       }
     }
 
+
+    if (this.newsStore) {
+      try {
+        const headlines = this.newsStore.getTopByPriority(5, 3_600_000);
+        if (headlines.length > 0) {
+          parts.push(`\n[NEWS HEADLINES (${headlines.length})]`);
+          for (const h of headlines) {
+            const ageMin = Math.round((Date.now() - h.published_at) / 60_000);
+            const tokens = h.mentioned_tokens.length > 0 ? ` | ${h.mentioned_tokens.join(',')}` : '';
+            parts.push(`  [${h.sentiment.toUpperCase()}] ${h.title.slice(0, 80)} (${h.source}, ${ageMin}m ago${tokens})`);
+          }
+
+          const sentiment = this.newsStore.getSentimentSummary();
+          parts.push(`  Sentiment: ${sentiment.bullish}🟢 ${sentiment.bearish}🔴 ${sentiment.neutral}⚪ | trend=${sentiment.trend}`);
+        }
+      } catch {}
+    }
+
     return parts.join('\n');
+  }
+
+getExposureSummary(maxConcurrent: number = 5, maxPortfolioPercent: number = 20): {
+    totalInvestedSol: number;
+    openPositions: number;
+    availableBalance: number;
+    maxNewPosition: number;
+    canOpenNew: boolean;
+    positions: Array<{ mint: string; symbol: string; pnlPercent: number; holdMinutes: number; invested: number }>;
+    consecutiveLosses: number;
+  } {
+    const now = Date.now();
+    const totalInvested = Array.from(this.positions.values())
+      .reduce((sum, p) => sum + p.amountSolInvested, 0);
+
+    const available = Math.max(0, this.walletBalance - totalInvested);
+    const maxByPercent = this.walletBalance * (maxPortfolioPercent / 100);
+    const maxNew = Math.min(maxByPercent, available);
+
+
+    let consecutiveLosses = 0;
+    const trades = [...this.recentTrades].reverse();
+    for (const t of trades) {
+      if (!t.success || t.action === 'sell') break;
+      if (t.action === 'buy' && !t.success) consecutiveLosses++;
+      else break;
+    }
+
+    const posArray = Array.from(this.positions.values()).map(p => ({
+      mint: p.mint,
+      symbol: p.symbol,
+      pnlPercent: p.entryPrice > 0 ? ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100 : 0,
+      holdMinutes: Math.round((now - p.openedAt) / 60_000),
+      invested: p.amountSolInvested,
+    }));
+
+    return {
+      totalInvestedSol: totalInvested,
+      openPositions: this.positions.size,
+      availableBalance: available,
+      maxNewPosition: maxNew,
+      canOpenNew: this.positions.size < maxConcurrent && maxNew > 0.005,
+      positions: posArray,
+      consecutiveLosses,
+    };
   }
 
   private trimSignals(): void {

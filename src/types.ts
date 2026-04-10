@@ -1,9 +1,5 @@
 import { EventEmitter } from 'events';
 
-// =====================================================
-// Skill System
-// =====================================================
-
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -35,10 +31,6 @@ export interface Skill {
   execute(tool: string, params: Record<string, any>): Promise<any>;
   shutdown(): Promise<void>;
 }
-
-// =====================================================
-// Agent System
-// =====================================================
 
 export type AutonomyLevel = 'autopilot' | 'advisor' | 'monitor' | 'manual';
 
@@ -77,7 +69,6 @@ export type LLMProviderName =
   | 'cohere'
   | 'lepton'
   | 'copilot'
-  | 'cursor'
   | 'google-oauth'
   | 'azure-oauth';
 
@@ -85,9 +76,11 @@ export interface ModelConfig {
   provider: LLMProviderName;
   model: string;
   apiKey?: string;
+  apiKeys?: string[];
   baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
+  contextWindow?: number;
   region?: string;
   oauthProvider?: string;
 }
@@ -122,10 +115,6 @@ export interface AgentState {
   cooldownUntil?: number;
 }
 
-// =====================================================
-// Session System
-// =====================================================
-
 export interface TradingSession {
   id: string;
   mode: AutonomyLevel;
@@ -147,11 +136,8 @@ export interface SessionStats {
   totalPnlSol: number;
   peakPnlSol: number;
   worstDrawdownSol: number;
+  winRate?: number;
 }
-
-// =====================================================
-// Trading Types
-// =====================================================
 
 export interface TradeIntent {
   id: string;
@@ -190,10 +176,6 @@ export interface Position {
   openedAt: number;
   lastUpdated: number;
 }
-
-// =====================================================
-// Token Types
-// =====================================================
 
 export interface TokenInfo {
   mint: string;
@@ -235,7 +217,7 @@ export interface HolderData {
   isBundled: boolean;
   suspiciousWallets: string[];
   checkedAt: number;
-  // LP / infrastructure breakdown
+
   lpPercent?: number;
   burnedPercent?: number;
   lpPools?: { name: string; percent: number }[];
@@ -253,10 +235,6 @@ export interface TokenSnapshot {
   bondingProgress: number;
   timestamp: number;
 }
-
-// =====================================================
-// Event System
-// =====================================================
 
 export interface EventMap {
   'token:new': { mint: string; name: string; symbol: string; dev: string; timestamp: number };
@@ -307,19 +285,21 @@ export interface EventMap {
   'agent:error': { agentId: string; error: string };
   'agent:tool_call': { agentId: string; tool: string; params: Record<string, any>; round: number };
   'agent:tool_result': { agentId: string; tool: string; result: any; durationMs: number };
-  'agent:llm_response': { agentId: string; content: string; toolCallsCount: number; round: number };
+  'agent:llm_response': { agentId: string; content: string; toolCallsCount: number; round: number; usage?: { promptTokens: number; completionTokens: number } };
   'agent:chat_request': { agentId: string; message: string };
+  'agent:token': { agentId: string; token: string; final?: boolean };
+  'agent:file_change': { agentId: string; path: string; diff: string; tool: string };
+  'agent:cycle_usage': { agentId: string; promptTokens: number; completionTokens: number; totalTokens: number };
 
   'system:ready': { timestamp: number };
   'system:health': { uptime: number; agents: AgentState[]; positions: Position[] };
   'system:error': { error: string; fatal: boolean };
 
-  'pipeline:learn': { winSignals: string[]; loseSignals: string[]; winRate: number; totalTrades: number };
-  'narrative:hot': { keywords: string[] };
-
   'trenches:alert': {
     mint: string; name: string; symbol: string; score: number;
     matchedMetas: string[]; activity: any; reason: string; timestamp: number;
+    mcap?: number; bondingProgress?: number; holders?: number;
+    description?: string; twitter?: string; telegram?: string; website?: string;
   };
   'trenches:buy': {
     mint: string; name: string; symbol: string; score: number;
@@ -329,6 +309,10 @@ export interface EventMap {
     analysis: string; tokens: Array<{ mint: string; name: string; symbol: string; score: number }>;
     batchSize: number; timestamp: number;
   };
+
+  'news:headline': { item: NewsItem; timestamp: number };
+  'news:batch': { items: NewsItem[]; source: string; count: number; timestamp: number };
+  'news:sentiment_update': NewsSentimentSummary;
 }
 
 export type EventName = keyof EventMap;
@@ -341,20 +325,14 @@ export interface EventBusInterface {
   history(event?: EventName, limit?: number): Array<{ event: EventName; data: any; timestamp: number }>;
 }
 
-// =====================================================
-// Wallet Interface
-// =====================================================
-
 export interface WalletInterface {
   getAddress(): string;
   getBalance(): Promise<number>;
+  hasWallet(): boolean;
+  getStoredWallets(): Array<{ name: string; address: string; privateKey: string; createdAt: number; isBurn?: boolean }>;
   sign(transaction: any): Promise<any>;
   signAndSend(transaction: any): Promise<string>;
 }
-
-// =====================================================
-// Memory Interface
-// =====================================================
 
 export interface MemoryInterface {
   recordTrade(trade: TradeResult & { intent: TradeIntent }): void;
@@ -376,14 +354,12 @@ export interface MemoryInterface {
   addRugAddress(address: string, reason: string): void;
   isKnownRug(address: string): boolean;
 
-  // AI Memory
   saveAIMemory(category: string, content: string, subject?: string, tags?: string[]): number;
   searchAIMemory(query: string, limit?: number): any[];
   getAIMemoryByCategory(category: string, subject?: string, limit?: number): any[];
   getRecentAIMemories(limit?: number): any[];
   deleteAIMemory(id: number): boolean;
 
-  // Token Pattern Uniqualizer
   storeTokenPattern(pattern: {
     mint: string;
     dev?: string;
@@ -409,10 +385,6 @@ export interface MemoryInterface {
   updatePatternOutcome(mint: string, outcome: string): void;
 }
 
-// =====================================================
-// Logger Interface
-// =====================================================
-
 export interface LoggerInterface {
   info(msg: string, data?: any): void;
   warn(msg: string, data?: any): void;
@@ -420,10 +392,6 @@ export interface LoggerInterface {
   debug(msg: string, data?: any): void;
   trade(msg: string, data?: any): void;
 }
-
-// =====================================================
-// Config Types
-// =====================================================
 
 export interface AppConfig {
   rpc: {
@@ -457,10 +425,6 @@ export interface AppConfig {
     auditLog?: boolean;
   };
 }
-
-// =====================================================
-// Strategy Types
-// =====================================================
 
 export interface StrategyCondition {
   field: string;
@@ -497,14 +461,50 @@ export interface StrategyConfig {
   };
 }
 
-// =====================================================
-// LLM Types
-// =====================================================
+export type NewsCategory = 'solana' | 'defi' | 'macro' | 'regulation' | 'memes' | 'hack' | 'general'
+  | 'politics' | 'sports' | 'tech' | 'business' | 'world' | 'science' | 'entertainment' | 'conflict' | 'elections' | 'weather' | 'crypto';
+export type NewsSentiment = 'bullish' | 'bearish' | 'neutral';
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  summary?: string;
+  summary_ru?: string;
+  url?: string;
+  source: string;
+  published_at: number;
+  category: NewsCategory;
+  sentiment: NewsSentiment;
+  relevance_score: number;
+  mentioned_tokens: string[];
+  priority: number;
+  votes?: { bullish: number; bearish: number; important: number };
+  created_at: number;
+}
+
+export interface NewsSentimentSummary {
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  trend: 'bullish' | 'bearish' | 'mixed' | 'neutral';
+  updated_at: number;
+}
+
+export interface NewsSourceStatus {
+  id: string;
+  name: string;
+  type: 'cryptopanic' | 'rss' | 'macro' | 'gdelt' | 'hackernews' | 'telegram';
+  enabled: boolean;
+  last_fetch: number;
+  error_count: number;
+  last_error?: string;
+  items_fetched: number;
+}
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
-  image?: string; // base64-encoded image (data URI or raw base64)
+  image?: string;
   toolCallId?: string;
   toolCalls?: LLMToolCall[];
 }

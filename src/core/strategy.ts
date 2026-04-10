@@ -1,4 +1,4 @@
-import { StrategyConfig, StrategyCondition, TokenInfo, TokenAnalysis, Position, LoggerInterface } from '../types';
+import { StrategyConfig, StrategyCondition, TokenInfo, TokenAnalysis, Position, LoggerInterface } from '../types.ts';
 
 export class StrategyEngine {
   private strategies = new Map<string, StrategyConfig>();
@@ -46,7 +46,7 @@ export class StrategyEngine {
 
     const ctx = this.buildContext(token, analysis);
 
-    // Check filters first
+
     if (this.activeStrategy.filters) {
       const blacklistPatterns = this.activeStrategy.filters.blacklistPatterns || [];
       for (const pattern of blacklistPatterns) {
@@ -63,7 +63,7 @@ export class StrategyEngine {
       }
     }
 
-    // Check entry conditions
+
     const failedConditions: string[] = [];
     for (const condition of this.activeStrategy.entry.conditions) {
       if (!this.evaluateCondition(condition, ctx)) {
@@ -102,7 +102,7 @@ export class StrategyEngine {
     const multiplier = 1 + pnlPercent / 100;
     const holdTimeMinutes = (Date.now() - position.openedAt) / 60_000;
 
-    // Check stop loss
+
     if (pnlPercent <= -exit.stopLossPercent) {
       return {
         shouldSell: true,
@@ -111,7 +111,7 @@ export class StrategyEngine {
       };
     }
 
-    // Check take profit levels (sorted by highest first)
+
     const sortedTP = [...exit.takeProfit].sort((a, b) => b.at - a.at);
     for (const tp of sortedTP) {
       if (multiplier >= tp.at) {
@@ -123,7 +123,7 @@ export class StrategyEngine {
       }
     }
 
-    // Check timeout
+
     if (exit.timeoutMinutes && holdTimeMinutes >= exit.timeoutMinutes) {
       if (exit.timeoutAction === 'sell') {
         return {

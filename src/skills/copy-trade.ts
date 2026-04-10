@@ -1,7 +1,7 @@
 import {
   Skill, SkillManifest, SkillContext,
   LoggerInterface, EventBusInterface, WalletInterface,
-} from '../types';
+} from '../types.ts';
 
 export class CopyTradeSkill implements Skill {
   manifest: SkillManifest = {
@@ -99,7 +99,6 @@ export class CopyTradeSkill implements Skill {
     this.eventBus = ctx.eventBus;
     this.wallet = ctx.wallet;
 
-    // Listen for wallet tracker buy signals
     this.eventBus.on('signal:buy', (data) => {
       if (!this.config.enabled) return;
       if (data.agentId === 'wallet-tracker' && data.reason.includes('Smart money')) {
@@ -107,7 +106,6 @@ export class CopyTradeSkill implements Skill {
       }
     });
 
-    // Listen for wallet tracker sell signals (autoSell)
     this.eventBus.on('signal:sell', (data) => {
       if (!this.config.enabled) return;
       if (!this.config.autoSell) return;
@@ -162,8 +160,8 @@ export class CopyTradeSkill implements Skill {
       let amountSol: number;
 
       if (action === 'sell') {
-        // For sell, we sell 100% of the copied position
-        amountSol = 0; // Not used for sell intent — percent-based
+
+        amountSol = 0;
       } else {
         amountSol = await this.calculateCopyAmount(sourceAmountSol);
       }
@@ -200,30 +198,27 @@ export class CopyTradeSkill implements Skill {
     }, delaySec * 1000);
   }
 
-  /**
-   * Calculate copy trade amount based on sizeMode configuration.
-   */
-  private async calculateCopyAmount(sourceAmountSol?: number): Promise<number> {
+private async calculateCopyAmount(sourceAmountSol?: number): Promise<number> {
     let amountSol: number;
 
     switch (this.config.sizeMode) {
       case 'percentage': {
-        // Use percentage of the original (source wallet) trade amount
+
         if (sourceAmountSol && sourceAmountSol > 0) {
           amountSol = sourceAmountSol * (this.config.percentageOfOriginal / 100);
         } else {
-          // Fallback to fixed if source amount unknown
+
           amountSol = this.config.fixedAmountSol;
           this.logger.debug('Copy trade: source amount unknown, falling back to fixed size');
         }
         break;
       }
       case 'proportional': {
-        // Proportional to our wallet balance vs source wallet
+
         try {
           const balance = await this.wallet.getBalance();
-          // Use a reasonable proportion: spend same % of our balance
-          // Default: spend fixedAmountSol as base, scaled to balance
+
+
           amountSol = Math.max(this.config.fixedAmountSol, balance * 0.05);
         } catch {
           amountSol = this.config.fixedAmountSol;

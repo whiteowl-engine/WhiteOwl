@@ -4,7 +4,7 @@ import {
   Position,
   LoggerInterface,
   EventBusInterface,
-} from '../types';
+} from '../types.ts';
 
 interface RiskState {
   openPositions: Position[];
@@ -67,7 +67,7 @@ export class RiskManager {
       return this.validateBuy(intent);
     }
 
-    // Sells are generally allowed (closing risk)
+
     return { approved: true };
   }
 
@@ -75,7 +75,7 @@ export class RiskManager {
     const amount = intent.amountSol || 0;
     const limits = this.getEffectiveLimits(intent.agentId);
 
-    // Position size check
+
     if (amount > limits.maxPositionSol) {
       this.emitLimitHit('position_size', amount, limits.maxPositionSol);
       return {
@@ -84,7 +84,7 @@ export class RiskManager {
       };
     }
 
-    // Open positions check
+
     if (this.state.openPositions.length >= limits.maxOpenPositions) {
       this.emitLimitHit('open_positions', this.state.openPositions.length, limits.maxOpenPositions);
       return {
@@ -93,7 +93,7 @@ export class RiskManager {
       };
     }
 
-    // Daily loss check
+
     if (this.state.dailyLoss >= limits.maxDailyLossSol) {
       this.emitLimitHit('daily_loss', this.state.dailyLoss, limits.maxDailyLossSol);
       return {
@@ -102,7 +102,7 @@ export class RiskManager {
       };
     }
 
-    // Total exposure check
+
     const newExposure = this.state.totalExposure + amount;
     const maxExposure = limits.maxPositionSol * limits.maxOpenPositions;
     if (newExposure > maxExposure) {
@@ -113,7 +113,7 @@ export class RiskManager {
       };
     }
 
-    // Emergency stop loss
+
     const totalLoss = this.state.dailyLoss;
     if (totalLoss >= this.globalLimits.emergencyStopLossSol) {
       this.state.emergencyStopped = true;
@@ -225,13 +225,10 @@ export class RiskManager {
     this.eventBus.on('position:closed', ({ mint, pnl }) => this.closePosition(mint, pnl));
   }
 
-  // =====================================================
-  // Per-position stop-loss & time-based exit
-  // =====================================================
 
-  private positionStopLossPct = 50;      // -50% = hard stop
-  private positionMaxHoldMinutes = 45;   // No growth in 45min = exit
-  private positionMinGrowthPct = 5;      // Minimum growth to keep alive
+  private positionStopLossPct = 50;
+  private positionMaxHoldMinutes = 45;
+  private positionMinGrowthPct = 5;
 
   setPositionLimits(opts: {
     stopLossPct?: number;
@@ -244,7 +241,7 @@ export class RiskManager {
   }
 
   private checkPositionStopLoss(pos: Position): void {
-    // Per-position hard stop-loss
+
     if (pos.unrealizedPnlPercent <= -this.positionStopLossPct) {
       this.logger.warn(`Position SL: ${pos.symbol} at ${pos.unrealizedPnlPercent.toFixed(1)}% (limit: -${this.positionStopLossPct}%)`);
       this.eventBus.emit('signal:sell', {
@@ -255,7 +252,7 @@ export class RiskManager {
       });
     }
 
-    // Time-based exit: position held too long without growth
+
     const holdMinutes = (Date.now() - pos.openedAt) / 60_000;
     if (holdMinutes >= this.positionMaxHoldMinutes && pos.unrealizedPnlPercent < this.positionMinGrowthPct) {
       this.logger.warn(`Position time decay: ${pos.symbol} held ${holdMinutes.toFixed(0)}min with ${pos.unrealizedPnlPercent.toFixed(1)}% growth`);

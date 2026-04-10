@@ -1,47 +1,22 @@
-import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types';
+import { Skill, SkillManifest, SkillContext, EventBusInterface, LoggerInterface, MemoryInterface } from '../types.ts';
 
-// =====================================================
-// Holder Intelligence — Deep On-Chain Holder Analysis
-//
-// Pump.fun Tokenomics:
-// ──────────────────────
-// Total supply: 1,000,000,000 tokens per coin
-// Dev allocation: 0% — dev buys like everyone else on the bonding curve
-// Bonding curve holds ~800M tokens initially (unsold supply)
-// As users buy, tokens leave the bonding curve
-// At 85 SOL raised → token "graduates" to pump.fun AMM pool
-// On graduation: ~200M tokens + ~85 SOL move to the AMM liquidity pool
-//
-// KEY INSIGHT (getTokenLargestAccounts):
-// The Solana RPC returns TOKEN ACCOUNT addresses (ATAs), NOT wallet addresses.
-// We must resolve each ATA → owner wallet via getMultipleAccounts(jsonParsed).
-//
-// Known infrastructure accounts (NOT real holders):
-// - Bonding curve accounts (pump.fun program-owned) = unsold supply
-// - Liquidity pool token accounts (pump.fun AMM / Raydium) = pool reserves
-// - Burn address = permanently locked tokens
-// - Fee collection accounts = protocol fees
-// These must be identified and excluded from "holder" metrics.
-// =====================================================
-
-// ── Known Solana program addresses ──
 const KNOWN_PROGRAMS: Record<string, string> = {
-  // Pump.fun
+
   '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': 'pump.fun Bonding Curve Program',
   'PumpFunAMMVyBmGAKgG3ksqyzVPBaQ5MqMk5MtKoFPu': 'pump.fun AMM Program',
-  // Raydium
+
   '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium AMM v4',
   '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h': 'Raydium CLMM',
   'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'Raydium CPMM',
-  // Orca
+
   'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': 'Orca Whirlpool',
-  // Meteora
+
   'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo': 'Meteora DLMM',
   'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB': 'Meteora Pool',
-  // Token programs
+
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA': 'SPL Token Program',
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb': 'Token-2022 Program',
-  // System
+
   '11111111111111111111111111111111': 'System Program',
 };
 
@@ -52,21 +27,20 @@ const BURN_ADDRESSES = new Set([
   '1111111111111111111111111111111111111111111',
 ]);
 
-// Known fee / infrastructure wallets
 const KNOWN_INFRASTRUCTURE = new Set([
-  'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbCJt85eFyR95', // pump.fun fee account
-  '39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg', // pump.fun migration
+  'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbCJt85eFyR95',
+  '39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg',
 ]);
 
 interface ResolvedHolder {
-  tokenAccount: string;       // ATA address (from getTokenLargestAccounts)
-  ownerWallet: string;        // Resolved wallet address
-  amount: number;             // Raw token amount
-  pct: number;                // % of total supply
-  uiAmount: number;           // Human-readable token amount
+  tokenAccount: string;
+  ownerWallet: string;
+  amount: number;
+  pct: number;
+  uiAmount: number;
   type: 'bonding_curve' | 'liquidity_pool' | 'burn' | 'dev' | 'infrastructure' | 'insider' | 'whale' | 'holder';
-  label: string;              // Human-readable label
-  programOwner: string;       // Owner program of the token account
+  label: string;
+  programOwner: string;
 }
 
 interface HolderCluster {
@@ -79,16 +53,16 @@ interface HolderCluster {
 
 interface HolderIntelligence {
   mint: string;
-  // ── Supply breakdown ──
+
   totalSupply: number;
-  bondingCurvePct: number;       // % still in bonding curve (unsold)
-  liquidityPoolPct: number;      // % in AMM liquidity pool
-  burnedPct: number;             // % burned/locked permanently
-  circulatingPct: number;        // % actually circulating among holders
-  // ── Holder metrics (EXCLUDES pools/curve/burn) ──
+  bondingCurvePct: number;
+  liquidityPoolPct: number;
+  burnedPct: number;
+  circulatingPct: number;
+
   totalHolders: number;
   uniqueWallets: number;
-  top10Pct: number;              // % of CIRCULATING supply held by top 10 real wallets
+  top10Pct: number;
   top20Pct: number;
   clusters: HolderCluster[];
   insiderWallets: string[];
@@ -100,7 +74,7 @@ interface HolderIntelligence {
   distribution: 'concentrated' | 'moderate' | 'distributed' | 'healthy';
   trend: 'accumulating' | 'distributing' | 'stable' | 'unknown';
   riskScore: number;
-  // ── Detailed holder list ──
+
   holders: ResolvedHolder[];
   analyzedAt: number;
 }
@@ -220,13 +194,12 @@ export class HolderIntelligenceSkill implements Skill {
   private solanaRpc = '';
   private heliusKey = '';
 
-  // Holder snapshots for trend analysis
   private snapshots = new Map<string, HolderSnapshot[]>();
-  // Dev wallets being monitored
+
   private watchedDevs = new Map<string, { mint: string; lastBalance: number }>();
-  // Cached analyses
+
   private cache = new Map<string, { intel: HolderIntelligence; expiresAt: number }>();
-  private readonly CACHE_TTL = 3 * 60_000; // 3 min
+  private readonly CACHE_TTL = 3 * 60_000;
 
   private stats = {
     totalAnalyses: 0,
@@ -265,14 +238,8 @@ export class HolderIntelligenceSkill implements Skill {
     this.cache.clear();
   }
 
-  // =====================================================
-  // Public API for Pipeline/Exit Optimizer integration
-  // =====================================================
 
-  /**
-   * Quick holder risk score for pipeline. Returns 0-100.
-   */
-  async quickRiskScore(mint: string): Promise<{ riskScore: number; flags: string[] }> {
+async quickRiskScore(mint: string): Promise<{ riskScore: number; flags: string[] }> {
     const cached = this.cache.get(mint);
     if (cached && cached.expiresAt > Date.now()) {
       return { riskScore: cached.intel.riskScore, flags: this.getFlags(cached.intel) };
@@ -300,9 +267,6 @@ export class HolderIntelligenceSkill implements Skill {
     return flags;
   }
 
-  // =====================================================
-  // Core analysis — RESOLVES ATAs TO WALLETS
-  // =====================================================
 
   private async fullAnalysis(mint: string): Promise<HolderIntelligence> {
     const cached = this.cache.get(mint);
@@ -311,20 +275,20 @@ export class HolderIntelligenceSkill implements Skill {
     this.stats.totalAnalyses++;
     const rpcUrl = this.getRpcUrl();
 
-    // Step 1: Fetch top token accounts (these are ATAs, NOT wallets)
+
     const rawAccounts = await this.fetchTokenLargestAccounts(rpcUrl, mint);
     if (!rawAccounts || rawAccounts.length === 0) {
       return this.buildEmptyIntel(mint);
     }
 
-    // Step 2: Resolve ATA addresses → owner wallets via getMultipleAccounts
+
     const resolvedHolders = await this.resolveTokenAccounts(rpcUrl, rawAccounts, mint);
 
-    // Step 3: Fetch token metadata for dev address
+
     const token = this.memory.getToken(mint);
     const devAddress = token?.dev || '';
 
-    // Step 4: Classify each holder
+
     const totalSupply = resolvedHolders.reduce((s, h) => s + h.amount, 0);
     let bondingCurveAmount = 0;
     let liquidityPoolAmount = 0;
@@ -350,31 +314,31 @@ export class HolderIntelligenceSkill implements Skill {
     const circulatingAmount = totalSupply - bondingCurveAmount - liquidityPoolAmount - burnedAmount - infrastructureAmount;
     const circulatingPct = totalSupply > 0 ? (circulatingAmount / totalSupply) * 100 : 0;
 
-    // Step 5: Analyze only REAL holders (exclude pools/curve/burn/infra)
+
     const realHolders = resolvedHolders.filter(h =>
       h.type !== 'bonding_curve' && h.type !== 'liquidity_pool' && h.type !== 'burn' && h.type !== 'infrastructure'
     );
 
-    // Recalculate percentages relative to CIRCULATING supply
+
     for (const h of realHolders) {
       h.pct = circulatingAmount > 0 ? (h.amount / circulatingAmount) * 100 : 0;
     }
     realHolders.sort((a, b) => b.pct - a.pct);
 
-    // Unique wallet count (some wallets may have multiple ATAs)
+
     const uniqueWallets = new Set(realHolders.map(h => h.ownerWallet)).size;
 
     const top10Pct = realHolders.slice(0, 10).reduce((s, h) => s + h.pct, 0);
     const top20Pct = realHolders.slice(0, 20).reduce((s, h) => s + h.pct, 0);
 
-    // Dev holding
+
     const devHoldings = realHolders.filter(h => h.ownerWallet === devAddress);
     const devHoldingPct = devHoldings.reduce((s, h) => s + h.pct, 0);
 
-    // Whale count (>2% of circulating supply)
+
     const whaleCount = realHolders.filter(h => h.pct >= 2).length;
 
-    // Detect clusters
+
     const clusters = this.findClusters(realHolders.map(h => ({
       address: h.ownerWallet,
       amount: h.amount,
@@ -382,21 +346,21 @@ export class HolderIntelligenceSkill implements Skill {
     })));
     if (clusters.length > 0) this.stats.clustersFound += clusters.length;
 
-    // Smart money overlap
+
     const smartMoneyOverlap = this.findSmartMoneyOverlap(realHolders.map(h => h.ownerWallet));
     if (smartMoneyOverlap.length > 0) this.stats.smartMoneyHits++;
 
-    // Distribution classification (based on circulating supply)
+
     const distribution = this.classifyDistribution(top10Pct, clusters.length);
 
-    // Trend analysis
+
     const trend = this.computeTrend(mint, realHolders.map(h => ({ address: h.ownerWallet, pct: h.pct })));
 
-    // Store snapshot
+
     this.storeSnapshot(mint, uniqueWallets, realHolders.slice(0, 20).map(h => ({ address: h.ownerWallet, pct: h.pct })));
 
-    // Risk score calculation
-    let riskScore = 20; // Lower baseline — we now have better data
+
+    let riskScore = 20;
 
     if (top10Pct > 80) riskScore += 30;
     else if (top10Pct > 60) riskScore += 20;
@@ -444,23 +408,15 @@ export class HolderIntelligenceSkill implements Skill {
     return intel;
   }
 
-  // =====================================================
-  // ATA → Wallet resolution
-  // =====================================================
 
-  /**
-   * Resolve token account addresses to their OWNER wallets.
-   * getTokenLargestAccounts returns ATA addresses; we need getMultipleAccounts
-   * with jsonParsed to extract the actual owner from each token account.
-   */
-  private async resolveTokenAccounts(
+private async resolveTokenAccounts(
     rpcUrl: string,
     accounts: { address: string; amount: number; decimals: number; uiAmount: number }[],
     mint: string,
   ): Promise<ResolvedHolder[]> {
     const resolved: ResolvedHolder[] = [];
 
-    // Batch resolve in groups of 20 (RPC limit for getMultipleAccounts is typically 100)
+
     const batchSize = 20;
     for (let i = 0; i < accounts.length; i += batchSize) {
       const batch = accounts.slice(i, i + batchSize);
@@ -468,7 +424,7 @@ export class HolderIntelligenceSkill implements Skill {
 
       try {
         const res = await fetch(rpcUrl, {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jsonrpc: '2.0', id: 1,
@@ -483,7 +439,7 @@ export class HolderIntelligenceSkill implements Skill {
         for (let j = 0; j < batch.length; j++) {
           const acct = batch[j];
           const info = results[j];
-          let ownerWallet = acct.address; // fallback: use ATA if resolution fails
+          let ownerWallet = acct.address;
           let programOwner = '';
 
           if (info?.value || info) {
@@ -500,15 +456,15 @@ export class HolderIntelligenceSkill implements Skill {
             tokenAccount: acct.address,
             ownerWallet,
             amount: acct.amount,
-            pct: 0, // calculated later
+            pct: 0,
             uiAmount: acct.uiAmount,
-            type: 'holder', // classified later
+            type: 'holder',
             label: '',
             programOwner,
           });
         }
       } catch (err) {
-        // Fallback: if batch resolution fails, add unresolved
+
         for (const acct of batch) {
           resolved.push({
             tokenAccount: acct.address,
@@ -527,43 +483,39 @@ export class HolderIntelligenceSkill implements Skill {
     return resolved;
   }
 
-  // =====================================================
-  // Holder classification
-  // =====================================================
 
   private classifyHolder(holder: ResolvedHolder, devAddress: string): ResolvedHolder['type'] {
     const wallet = holder.ownerWallet;
     const program = holder.programOwner;
 
-    // Check burn addresses
+
     if (BURN_ADDRESSES.has(wallet)) return 'burn';
 
-    // Check known infrastructure
+
     if (KNOWN_INFRASTRUCTURE.has(wallet)) return 'infrastructure';
 
-    // Check if owned by pump.fun bonding curve program
+
     if (program === '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') return 'bonding_curve';
 
-    // Check if owned by pump.fun AMM or DEX programs (liquidity pool)
+
     const poolPrograms = [
-      'PumpFunAMMVyBmGAKgG3ksqyzVPBaQ5MqMk5MtKoFPu', // pump.fun AMM
-      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM v4
-      '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h', // Raydium CLMM
-      'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CPMM
-      'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',   // Orca
-      'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',   // Meteora DLMM
-      'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',  // Meteora Pool
+      'PumpFunAMMVyBmGAKgG3ksqyzVPBaQ5MqMk5MtKoFPu',
+      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+      '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h',
+      'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK',
+      'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',
+      'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+      'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',
     ];
     if (poolPrograms.includes(program)) return 'liquidity_pool';
 
-    // Check if the owner wallet itself is a known program (PDA-owned account)
+
     if (KNOWN_PROGRAMS[wallet]) return 'liquidity_pool';
 
-    // Check for dev
+
     if (devAddress && wallet === devAddress) return 'dev';
 
-    // If we couldn't resolve the owner and the ATA has a huge % → likely bonding curve or pool
-    // The bonding curve/pool accounts are often owned by the pump.fun program, not a wallet
+
     if (holder.label === 'unresolved' && holder.pct > 30) return 'bonding_curve';
 
     return 'holder';
@@ -617,7 +569,7 @@ export class HolderIntelligenceSkill implements Skill {
 
     try {
       const res = await fetch(rpcUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,
@@ -657,14 +609,14 @@ export class HolderIntelligenceSkill implements Skill {
     totalWhalePct: number;
     supplyBreakdown: { bondingCurvePct: number; liquidityPoolPct: number; burnedPct: number; circulatingPct: number };
   }> {
-    // Use full analysis to get properly classified holders
+
     const intel = await this.fullAnalysis(mint);
 
     const realHolders = intel.holders.filter(h =>
       h.type !== 'bonding_curve' && h.type !== 'liquidity_pool' && h.type !== 'burn' && h.type !== 'infrastructure'
     );
 
-    // Recalculate for circulating supply
+
     const circulatingTotal = realHolders.reduce((s, h) => s + h.amount, 0);
     const whales = realHolders
       .map(h => ({
@@ -725,7 +677,7 @@ export class HolderIntelligenceSkill implements Skill {
 
     const holderChange = latest.holders - oldest.holders;
 
-    // Check if top holders are accumulating or distributing
+
     let topChange = 0;
     if (oldest.topHolders.length > 0 && latest.topHolders.length > 0) {
       const oldTopPct = oldest.topHolders.slice(0, 5).reduce((s, h) => s + h.pct, 0);
@@ -734,7 +686,7 @@ export class HolderIntelligenceSkill implements Skill {
     }
 
     let trend: 'accumulating' | 'distributing' | 'stable' | 'unknown';
-    if (holderChange > 5 && topChange < -2) trend = 'distributing'; // More holders but whales selling
+    if (holderChange > 5 && topChange < -2) trend = 'distributing';
     else if (holderChange < -3) trend = 'distributing';
     else if (topChange > 3) trend = 'accumulating';
     else if (holderChange > 5) trend = 'accumulating';
@@ -748,16 +700,13 @@ export class HolderIntelligenceSkill implements Skill {
     return { status: 'watching' };
   }
 
-  /**
-   * Check dev wallets for selling. Called periodically.
-   */
-  async checkDevWallets(): Promise<void> {
+async checkDevWallets(): Promise<void> {
     const rpcUrl = this.getRpcUrl();
 
     for (const [devAddress, state] of this.watchedDevs) {
       try {
         const res = await fetch(rpcUrl, {
-          method: 'POST',
+                    method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jsonrpc: '2.0', id: 1,
@@ -773,7 +722,7 @@ export class HolderIntelligenceSkill implements Skill {
         }, 0);
 
         if (state.lastBalance >= 0 && balance < state.lastBalance * 0.9) {
-          // Dev sold >10% of holdings
+
           this.stats.devDumpsDetected++;
           this.logger.warn(`DEV DUMP: ${devAddress.slice(0, 8)}... sold tokens on ${state.mint.slice(0, 8)}`);
           this.eventBus.emit('signal:sell', {
@@ -786,20 +735,17 @@ export class HolderIntelligenceSkill implements Skill {
 
         state.lastBalance = balance;
       } catch {
-        // Non-critical
+
       }
     }
   }
 
-  // =====================================================
-  // Internal helpers
-  // =====================================================
 
   private findClusters(holders: { address: string; amount: number; pct: number }[]): HolderCluster[] {
     const clusters: HolderCluster[] = [];
 
-    // Heuristic: wallets with very similar holding amounts (within 5%) are likely same entity
-    const significant = holders.filter(h => h.pct >= 0.5); // Only care about >0.5% holders
+
+    const significant = holders.filter(h => h.pct >= 0.5);
 
     const grouped = new Map<string, typeof significant>();
     const used = new Set<string>();
@@ -817,7 +763,7 @@ export class HolderIntelligenceSkill implements Skill {
         const maxAmount = Math.max(significant[i].amount, significant[j].amount);
         const similarity = maxAmount > 0 ? diff / maxAmount : 1;
 
-        if (similarity < 0.05) { // Within 5% same amount
+        if (similarity < 0.05) {
           cluster.push(significant[j]);
           used.add(significant[j].address);
         }
@@ -838,8 +784,8 @@ export class HolderIntelligenceSkill implements Skill {
   }
 
   private findSmartMoneyOverlap(holderAddresses: string[]): string[] {
-    // TODO: Cross-reference with wallet-tracker's watched wallets
-    // For now, return empty — will be connected when wallet-tracker exposes getTrackedAddresses()
+
+
     return [];
   }
 
@@ -871,7 +817,7 @@ export class HolderIntelligenceSkill implements Skill {
       timestamp: Date.now(),
     });
 
-    // Keep last 30 snapshots
+
     if (snaps.length > 30) snaps.splice(0, snaps.length - 30);
     this.snapshots.set(mint, snaps);
   }
@@ -879,7 +825,7 @@ export class HolderIntelligenceSkill implements Skill {
   private async fetchTokenLargestAccounts(rpcUrl: string, mint: string): Promise<{ address: string; amount: number; decimals: number; uiAmount: number }[] | null> {
     try {
       const res = await fetch(rpcUrl, {
-        method: 'POST',
+                method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0', id: 1,

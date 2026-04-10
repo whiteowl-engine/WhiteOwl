@@ -1,26 +1,12 @@
-/**
- * Multi-Agent Coordinator — Phase 4
- *
- * Specialized agents communicate through a shared message bus:
- * - Scanner Agent: monitors new tokens, feeds alpha
- * - Risk Analyst Agent: evaluates exposure, recommends exits
- * - Sentiment Agent: processes social signals, KOL mentions
- * - Commander Agent: receives all agent intel, makes final decisions
- *
- * Agents publish typed messages on the event bus. The coordinator
- * manages agent lifecycles and routes inter-agent communication.
- */
 
 import {
   AgentConfig, AgentState, EventBusInterface, LoggerInterface,
   LLMProvider, AutonomyLevel, ModelConfig,
-} from '../types';
-import { AgentRunner } from './agent-runner';
-import { SkillLoader } from './skill-loader';
-import { MarketStateBuilder } from './market-state';
-import { getLLMProvider, getLLMProviderWithFallback } from '../llm';
-
-// ----- Inter-agent message protocol -----
+} from '../types.ts';
+import { AgentRunner } from './agent-runner.ts';
+import { SkillLoader } from './skill-loader.ts';
+import { MarketStateBuilder } from './market-state.ts';
+import { getLLMProvider, getLLMProviderWithFallback } from '../llm/index.ts';
 
 export interface AgentMessage {
   from: string;
@@ -40,20 +26,17 @@ export interface AgentRole {
   systemPrompt: string;
 }
 
-// ----- Predefined agent roles -----
-
 export const AGENT_ROLES: Record<string, AgentRole> = {
   scanner: {
     id: 'agent_scanner',
     name: 'Scanner Agent',
     specialty: 'Token discovery and alpha extraction',
-    skills: ['pump-monitor', 'alpha-scanner', 'dex-screener', 'trend-sniper'],
+    skills: ['pump-monitor', 'alpha-scanner', 'gmgn'],
     triggers: [
       { event: 'token:new', action: 'evaluate_token' },
-      { event: 'narrative:hot', action: 'narrative_alert' },
     ],
     systemPrompt: `You are the Scanner Agent for WhiteOwl. Your job:
-1. Monitor new pump.fun tokens and DexScreener trends
+1. Monitor new pump.fun tokens and GMGN trends
 2. Extract alpha from social channels (Telegram, Twitter)
 3. Identify narrative-matching tokens before others
 4. Report promising finds to the Commander with confidence score
@@ -64,7 +47,7 @@ Always be concise. Report: token mint, name, why it's interesting, confidence (1
     id: 'agent_risk',
     name: 'Risk Analyst',
     specialty: 'Portfolio risk assessment and exposure management',
-    skills: ['portfolio', 'token-analyzer', 'fast-sniper'],
+    skills: ['portfolio', 'token-analyzer'],
     triggers: [
       { event: 'position:opened', action: 'assess_new_position' },
       { event: 'position:updated', action: 'check_risk' },
@@ -98,7 +81,7 @@ Focus on signal quality. KOL with history of good calls > random mentions.`,
     id: 'agent_commander',
     name: 'Commander',
     specialty: 'Strategic decision making and agent coordination',
-    skills: ['fast-sniper', 'portfolio', 'pump-trader', 'advanced-trader'],
+    skills: ['portfolio', 'shit-trader', 'advanced-trader'],
     triggers: [
       { event: 'periodic', action: 'strategic_review', filter: { intervalMs: 10000 } },
     ],
@@ -110,8 +93,6 @@ Focus on signal quality. KOL with history of good calls > random mentions.`,
 You see the big picture. Individual agents report to you. Only you execute trades.`,
   },
 };
-
-// ----- Multi-Agent Coordinator -----
 
 export class MultiAgentCoordinator {
   private eventBus: EventBusInterface;
@@ -135,9 +116,6 @@ export class MultiAgentCoordinator {
     this.marketState = opts.marketState;
   }
 
-  /**
-   * Create and register a specialized sub-agent.
-   */
   addAgent(role: AgentRole, model: ModelConfig, fallbackModels?: ModelConfig[], autonomy: AutonomyLevel = 'autopilot'): void {
     const config: AgentConfig = {
       id: role.id,
@@ -177,20 +155,14 @@ export class MultiAgentCoordinator {
     this.logger.info(`Multi-agent: registered ${role.name} (${role.specialty})`);
   }
 
-  /**
-   * Boot all predefined agents with a shared model config.
-   */
-  bootAll(model: ModelConfig, fallbackModels?: ModelConfig[]): void {
+bootAll(model: ModelConfig, fallbackModels?: ModelConfig[]): void {
     for (const role of Object.values(AGENT_ROLES)) {
       this.addAgent(role, model, fallbackModels);
     }
     this.logger.info(`Multi-agent: ${this.agents.size} agents ready`);
   }
 
-  /**
-   * Send a typed message between agents.
-   */
-  sendMessage(msg: AgentMessage): void {
+sendMessage(msg: AgentMessage): void {
     this.messageLog.push(msg);
     if (this.messageLog.length > this.MAX_LOG) {
       this.messageLog = this.messageLog.slice(-this.MAX_LOG);
@@ -198,7 +170,7 @@ export class MultiAgentCoordinator {
 
     this.logger.debug(`Agent msg: ${msg.from} → ${msg.to} [${msg.type}] ${JSON.stringify(msg.payload).slice(0, 100)}`);
 
-    // Route to target agent(s)
+
     if (msg.to === 'broadcast') {
       for (const [id, agent] of this.agents) {
         if (id !== msg.from) {
@@ -236,14 +208,8 @@ export class MultiAgentCoordinator {
     return this.messageLog.slice(-limit);
   }
 
-  /**
-   * Wire up automatic inter-agent communication:
-   * - Scanner findings → Commander
-   * - Risk alerts → Commander
-   * - Sentiment scores → Commander
-   */
-  private setupInterAgentRouting(): void {
-    // Scanner → broadcast intel on new signals
+private setupInterAgentRouting(): void {
+
     this.eventBus.on('signal:buy', (data) => {
       this.sendMessage({
         from: 'agent_scanner',
@@ -255,7 +221,7 @@ export class MultiAgentCoordinator {
       });
     });
 
-    // Risk → alert commander on rug detection
+
     this.eventBus.on('signal:rug', (data) => {
       this.sendMessage({
         from: 'agent_risk',
@@ -267,16 +233,5 @@ export class MultiAgentCoordinator {
       });
     });
 
-    // Narrative → sentiment + commander
-    this.eventBus.on('narrative:hot', (data) => {
-      this.sendMessage({
-        from: 'agent_scanner',
-        to: 'broadcast',
-        type: 'intel',
-        payload: { signal: 'narrative', keywords: data.keywords },
-        timestamp: Date.now(),
-        priority: 'high',
-      });
-    });
   }
 }

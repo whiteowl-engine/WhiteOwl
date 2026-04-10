@@ -1,16 +1,5 @@
-/**
- * Contextual Memory — Phase 4
- *
- * Extended memory layer that tracks:
- * - Dev wallet behavioral patterns (serial rugger? clean launches?)
- * - Strategy performance by time-of-day / day-of-week
- * - Token name/symbol pattern success rates
- * - Narrative outcome history (which trends were profitable?)
- */
 
-import { Database } from './sql-compat';
-
-// ----- Tables -----
+import { Database } from './sql-compat.ts';
 
 export const CONTEXT_MEMORY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS dev_wallet_memory (
@@ -70,8 +59,6 @@ export class ContextualMemory {
     this.db.exec(CONTEXT_MEMORY_SCHEMA);
   }
 
-  // ===== Dev Wallet Memory =====
-
   recordDevLaunch(address: string, data: {
     isRug: boolean;
     lifetimeMin: number;
@@ -99,7 +86,6 @@ export class ContextualMemory {
       const avgLife = ((existing.avg_token_lifetime_min * existing.total_launches) + data.lifetimeMin) / total;
       const avgMcap = ((existing.avg_mcap_peak * existing.total_launches) + data.peakMcap) / total;
 
-      // Auto-reputation
       let rep = 'unknown';
       if (rugs >= 3 || (total >= 3 && rugs / total > 0.6)) rep = 'serial_rugger';
       else if (clean >= 3 && rugs === 0) rep = 'trusted';
@@ -143,8 +129,6 @@ export class ContextualMemory {
       totalLaunches: r.total_launches,
     }));
   }
-
-  // ===== Hourly Performance =====
 
   recordHourlyOutcome(pnlSol: number, isWin: boolean): void {
     const now = new Date();
@@ -206,8 +190,6 @@ export class ContextualMemory {
     }));
   }
 
-  // ===== Pattern Memory =====
-
   recordPattern(pattern: string, category: string, pnlPercent: number, isWin: boolean): void {
     const existing = this.db.prepare('SELECT * FROM pattern_memory WHERE pattern = ?').get(pattern) as any;
 
@@ -246,8 +228,6 @@ export class ContextualMemory {
     }));
   }
 
-  // ===== Narrative Outcomes =====
-
   recordNarrativeOutcome(narrative: string, keywords: string[], tokensBought: number, wins: number, losses: number, pnlSol: number): void {
     this.db.prepare(`
       INSERT INTO narrative_outcomes (narrative, keywords, tokens_bought, wins, losses, total_pnl_sol)
@@ -276,18 +256,15 @@ export class ContextualMemory {
     }));
   }
 
-  // ===== Context Summary for AI =====
-
   buildContextSummary(): string {
     const parts: string[] = ['[CONTEXTUAL MEMORY]'];
 
-    // Dev reputation summary
     const ruggers = this.getSerialRuggers(2);
     if (ruggers.length > 0) {
       parts.push(`Known serial ruggers: ${ruggers.length} wallets (${ruggers.slice(0, 3).map(r => r.address.slice(0, 8) + '...' + r.rugCount + 'rugs').join(', ')})`);
     }
 
-    // Best/worst hours
+
     const bestHours = this.getBestTradingHours(3);
     if (bestHours.length > 0) {
       const best = bestHours[0];
@@ -299,13 +276,12 @@ export class ContextualMemory {
       parts.push(`Worst trading: UTC ${worst.hour}:00 Day${worst.dayOfWeek} (${(worst.winRate * 100).toFixed(0)}% WR)`);
     }
 
-    // Best patterns
+
     const namePatterns = this.getProfitablePatterns('name', 2);
     if (namePatterns.length > 0) {
       parts.push(`Profitable name patterns: ${namePatterns.slice(0, 3).map(p => `"${p.pattern}" ${(p.winRate * 100).toFixed(0)}%WR`).join(', ')}`);
     }
 
-    // Best narratives
     const narrs = this.getBestNarratives(3);
     if (narrs.length > 0) {
       parts.push(`Best narratives: ${narrs.map(n => `"${n.narrative}" ${n.totalPnl.toFixed(2)}SOL`).join(', ')}`);
