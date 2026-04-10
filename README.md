@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/github-hero.gif" width="100%" alt="WhiteOwl hero banner">
+  <img src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl/main/public/github-hero.gif?v=2" width="100%" alt="WhiteOwl hero banner">
 </p>
 
 <h1 align="center">WhiteOwl</h1>
