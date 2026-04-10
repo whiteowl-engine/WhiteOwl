@@ -1,16 +1,13 @@
 {
   "type": "module",
   "name": "whiteowl",
+  "private": true,
   "version": "0.1.0",
-  "description": "Autonomous AI trading shell for Solana memecoins",
-  "main": "dist/index.js",
-  "bin": {
-    "whiteowl": "dist/index.js"
-  },
+  "description": "AI-powered trading panel for Solana memecoins",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js server",
+    "start": "tsx src/index.ts server",
     "monitor": "tsx src/index.ts monitor",
     "autopilot": "tsx src/index.ts autopilot",
     "report": "tsx src/index.ts report"
@@ -18,6 +15,27 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/whiteowl-engine/WhiteOwl.git"
+  },
+  "homepage": "https://github.com/whiteowl-engine/WhiteOwl#readme",
+  "bugs": {
+    "url": "https://github.com/whiteowl-engine/WhiteOwl/issues"
+  },
+  "keywords": [
+    "whiteowl",
+    "solana",
+    "trading",
+    "dashboard",
+    "ai",
+    "agents",
+    "memecoin",
+    "pump-fun",
+    "gmgn",
+    "automation"
+  ],
+  "author": "diegoochavezz",
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@pump-fun/pump-sdk": "^1.31.0",

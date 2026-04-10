@@ -1,27 +1,50 @@
 <p align="center">
-  <img src="public/logo.svg" width="80" alt="WhiteOwl">
+  <img src="./public/github-hero.svg" width="100%" alt="WhiteOwl hero banner">
 </p>
 
 <h1 align="center">WhiteOwl</h1>
 
 <p align="center">
-  <strong>AI-Powered Trading Panel for Solana Memecoins</strong>
+  <strong>AI-powered trading panel for Solana memecoins</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
-  <img src="https://img.shields.io/badge/typescript-5.x-blue" alt="TypeScript">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/skills-29-orange" alt="Skills">
-  <img src="https://img.shields.io/badge/tools-208-orange" alt="Tools">
-  <img src="https://img.shields.io/badge/solana-mainnet-purple" alt="Solana">
+  Local-first dashboard for AI chat, wallet management, live market monitoring, browser automation, and autonomous trading workflows.
 </p>
 
 <p align="center">
-  Web dashboard with autonomous monitoring, analysis and execution on pump.fun via multi-agent AI system with 29 plugin skills and 208 tools.
+  <img src="https://img.shields.io/badge/node-%3E%3D18-111827?style=for-the-badge&logo=node.js&logoColor=7ee787&labelColor=020617" alt="Node">
+  <img src="https://img.shields.io/badge/typescript-5.x-111827?style=for-the-badge&logo=typescript&logoColor=7dd3fc&labelColor=020617" alt="TypeScript">
+  <img src="https://img.shields.io/badge/license-MIT-111827?style=for-the-badge&logo=opensourceinitiative&logoColor=a3e635&labelColor=020617" alt="License">
+  <img src="https://img.shields.io/badge/skills-29-111827?style=for-the-badge&logo=buffer&logoColor=f59e0b&labelColor=020617" alt="Skills">
+  <img src="https://img.shields.io/badge/tools-208-111827?style=for-the-badge&logo=raycast&logoColor=f97316&labelColor=020617" alt="Tools">
+  <img src="https://img.shields.io/badge/solana-mainnet-111827?style=for-the-badge&logo=solana&logoColor=c084fc&labelColor=020617" alt="Solana">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#highlights">Highlights</a> •
+  <a href="#dashboard-surfaces">Dashboard</a> •
+  <a href="#skill-system">Skills</a> •
+  <a href="#api">API</a>
 </p>
 
 ---
+
+## Highlights
+
+| Surface | What it does |
+|---|---|
+| **AI Chat** | Multi-agent operator console with model switching, auto-approve controls, streamed reasoning, and persistent sessions |
+| **Market Intel** | Live events, news aggregation, X tracking, token discovery, holder analysis, and pump.fun monitoring |
+| **Trading Workflow** | Paper/live execution profiles, risk limits, copy trading, curve analysis, exit automation, and wallet tools |
+| **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
+
+## What Is WhiteOwl?
+
+WhiteOwl is a local-first trading panel designed for fast operator workflows around Solana memecoins. It combines a browser dashboard, AI agent layer, market scanners, wallet tooling, and automation primitives in one runtime.
+
+The current public build exposes the main dashboard, agent chat, portfolio, wallet, token explorer, news and X feeds, live events, jobs, projects, skills, terminal, settings, and the autonomous trading surface. Runtime data stays local in `data/`, and secrets stay out of Git via `.gitignore`.
 
 ## Features
 
@@ -40,22 +63,33 @@
 - **GMGN Integration** — Token data, security analysis, holder intelligence
 - **Axiom Integration** — Direct REST API integration with axiom.trade
 - **Browser Automation** — Full browser control via CDP for Axiom, Twitter, GMGN and any site
-- **Chrome Extension** — WhiteOwl overlay for pump.fun with AI-powered trading tools
 - **Background Jobs** — Scheduled monitoring tasks (Hot Posts Tracker, Live Monitoring)
 - **Multi-Wallet** — Multiple Solana wallets with multisig vault support
 - **Project Workspace** — Local filesystem access for AI code generation
-- **Skill Hub** — Community skill marketplace — browse, import, export, and share skills
 - **Built-in Terminal** — Persistent terminal sessions for AI agents
 - **SQLite Memory** — All tokens, trades, snapshots, analysis persisted locally
 
 ## Quick Start
 
-```bash
-git clone https://github.com/user/WhiteOwl.git
+```powershell
+git clone https://github.com/whiteowl-engine/WhiteOwl.git
 cd WhiteOwl
 npm install
-cp .env.example .env     # Edit with your keys
+Copy-Item .env.example .env
 npm start                # http://localhost:3377
+```
+
+macOS/Linux:
+
+```bash
+cp .env.example .env
+```
+
+Minimal `.env` values:
+
+```env
+SOLANA_RPC_URL=
+HELIUS_API_KEY=
 ```
 
 LLM can be configured through the Settings page in the panel (GitHub Copilot OAuth for free access, or add API keys for any supported provider).
@@ -67,7 +101,7 @@ LLM can be configured through the Settings page in the panel (GitHub Copilot OAu
 | `npm run autopilot` | Full autonomous trading |
 | `npm run monitor` | Watch-only, no trades |
 
-## Dashboard Pages
+## Dashboard Surfaces
 
 | Page | Description |
 |------|-------------|
@@ -84,13 +118,11 @@ LLM can be configured through the Settings page in the panel (GitHub Copilot OAu
 | **Background Jobs** | Scheduled tasks with run counts, status, and results |
 | **Shit Trader** | Autonomous trading surface — paper/live toggle, execution profile, risk engine, Axiom + Pump.fun connections |
 | **Skills** | 29 skills and 208 tools organized by category (Trading, Analysis, Market Intel, Portfolio, Other) |
-| **Skill Hub** | Community skill marketplace — browse, import, export, share |
 | **Projects** | Local AI project workspace with file management |
-| **Extension** | Chrome extension installer and management for pump.fun overlay |
 | **Terminal** | Built-in terminal with AI Agent and manual tabs |
 | **Settings** | RPC configuration, OAuth / AI model selection, browser CDP connection, system health |
 
-## Skills
+## Skill System
 
 29 skills organized by category:
 
@@ -145,6 +177,8 @@ LLM can be configured through the Settings page in the panel (GitHub Copilot OAu
 
 Total: **29 skills**, **208 tools** available to AI agents.
 
+Representative runtime skills include `pump-monitor`, `token-analyzer`, `shit-trader`, `portfolio`, `wallet-tracker`, `gmgn`, `browser-eye`, `projects`, `terminal`, `background-jobs`, `ai-memory`, and `news-search`.
+
 ## Risk Management
 
 The Risk Manager enforces hard limits that **no agent can bypass**:
@@ -171,10 +205,6 @@ REST API + WebSocket server on port 3377:
 - `POST /api/chat` — Chat with agent
 - `ws://localhost:3377/ws` — Live event stream
 
-## Chrome Extension
-
-WhiteOwl browser extension provides an AI-powered overlay directly on pump.fun. Supports Chrome, Edge, and Brave. Install from the Extension page in the panel or from Chrome Web Store.
-
 ## Project Structure
 
 ```
@@ -197,6 +227,7 @@ WhiteOwl/
 ```bash
 npm run build            # Compile TypeScript
 npm run dev              # Development mode with hot reload
+npm start                # Run via tsx from source
 npx tsc --noEmit         # Type checking
 ```
 
