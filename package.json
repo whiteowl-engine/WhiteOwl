@@ -2,7 +2,7 @@
   "type": "module",
   "name": "whiteowl",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "AI-powered trading panel for Solana memecoins",
   "scripts": {
     "dev": "tsx watch src/index.ts",
