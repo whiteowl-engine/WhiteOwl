@@ -1,7 +1,6 @@
 {
   "type": "module",
-  "name": "whiteowl",
-  "private": true,
+  "name": "@whiteowl-engine/whiteowl",
   "version": "1.0.0",
   "description": "AI-powered trading panel for Solana memecoins",
   "scripts": {
@@ -75,5 +74,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
 }

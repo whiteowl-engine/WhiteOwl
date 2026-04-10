@@ -25,3 +25,5 @@ screenshot-*.png
 .DS_Store
 Thumbs.db
 .vscode/
+
+.npmrc
