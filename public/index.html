@@ -2840,7 +2840,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
               <div style="padding:18px;background:linear-gradient(180deg,#eef3f7 0%,#e6ebf0 100%);border-left:1px solid var(--border)">
                 <div style="height:100%;display:flex;flex-direction:column;gap:10px;justify-content:center">
                   <div style="overflow:hidden;border-radius:24px;background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.8);box-shadow:0 18px 40px rgba(80,123,158,.12)">
-                    <video src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/ex.mp4" poster="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/screenshots/chat-surface.png" controls autoplay muted loop playsinline style="display:block;width:100%;height:auto;background:#ebe7df"></video>
+                    <video src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/ex.mp4" poster="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/screenshots/chat-surface.png" autoplay muted loop playsinline preload="auto" disablepictureinpicture disableremoteplayback tabindex="-1" aria-hidden="true" style="pointer-events:none;user-select:none;display:block;width:100%;height:auto;background:#ebe7df"></video>
                   </div>
                   <div style="font-size:.72rem;color:var(--muted);line-height:1.5;text-align:center">Live product preview from the WhiteOwl-Extension repository.</div>
                 </div>
@@ -2888,11 +2888,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                 <div class="card-b">
                   <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:12px">
                     <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)">
-                      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">Extension ID</div>
-                      <div id="extIdValue" style="font-family:monospace;font-size:.8rem;color:var(--primary);word-break:break-all">Not available</div>
-                    </div>
-                    <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)">
-                      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">Server URL</div>
+                      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">Panel Server URL</div>
                       <div id="extServerUrl" style="font-family:monospace;font-size:.8rem;color:var(--primary)">Not available</div>
                     </div>
                   </div>
@@ -11312,10 +11308,6 @@ function initExtensionTab() {
   fetch(API + '/extension/status', { headers: authHeaders() })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d && d.extensionId) {
-        var idEl = $('#extIdValue');
-        if (idEl) idEl.textContent = d.extensionId;
-      }
       if (d && d.installed) {
         var badge = $('#extStatusBadge');
         if (badge) {
