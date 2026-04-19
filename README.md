@@ -24,6 +24,7 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#highlights">Highlights</a> •
+  <a href="#companion-extension">Extension</a> •
   <a href="#dashboard-surfaces">Dashboard</a> •
   <a href="#skill-system">Skills</a> •
   <a href="#api">API</a>
@@ -39,6 +40,28 @@
 | **Market Intel** | Live events, news aggregation, X tracking, token discovery, holder analysis, and pump.fun monitoring |
 | **Trading Workflow** | Paper/live execution profiles, risk limits, copy trading, curve analysis, exit automation, and wallet tools |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
+
+## Companion Extension
+
+WhiteOwl is designed as a two-part stack:
+
+- [WhiteOwl](https://github.com/whiteowl-engine/WhiteOwl) is the main local panel, backend runtime, AI agent layer, market dashboard, jobs surface, and automation desk.
+- [WhiteOwl Extension](https://github.com/whiteowl-engine/WhiteOwl-Extension) is the browser wallet, provider bridge, connected-site layer, inspector, and in-browser side panel.
+
+Run them together for the full workflow: the panel provides the runtime and backend services, while the extension provides the browser-native wallet and page context layer that feeds directly into the desk.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/screenshots/wallet-overview.png" alt="WhiteOwl Extension wallet" width="100%">
+      <p><strong>Wallet companion</strong><br>The extension carries wallet actions, connected-site state, and browser-local controls next to the main panel.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/screenshots/inspector-surface.png" alt="WhiteOwl Extension inspector" width="100%">
+      <p><strong>Browser context layer</strong><br>Inspector and page capture flows move live browser context into the WhiteOwl panel for analysis and action.</p>
+    </td>
+  </tr>
+</table>
 
 ## What Is WhiteOwl?
 
@@ -93,6 +116,12 @@ HELIUS_API_KEY=
 ```
 
 LLM can be configured through the Settings page in the panel (GitHub Copilot OAuth for free access, or add API keys for any supported provider).
+
+Companion extension repo:
+
+```text
+https://github.com/whiteowl-engine/WhiteOwl-Extension
+```
 
 | Command | Description |
 |---------|-------------|
