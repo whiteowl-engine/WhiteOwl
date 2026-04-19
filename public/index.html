@@ -2811,14 +2811,10 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                     Open Extension Repo
                   </a>
-                  <a href="https://github.com/whiteowl-engine/WhiteOwl-Extension/releases/latest" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" style="text-decoration:none">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Latest Release
-                  </a>
-                  <a id="extBatDownload" href="/extension/install.bat" download="WhiteOwl-install.bat" class="btn btn-success" style="text-decoration:none">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Windows Installer
-                  </a>
+                  <button type="button" class="btn btn-ghost" onclick="copyExtensionCloneCommand('repo')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copy Clone Command
+                  </button>
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
@@ -2860,13 +2856,13 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                   </div>
                   <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
                     <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">2</div>
-                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Get the Build</div>
-                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Use the Windows installer here or download the latest release from the extension repository.</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Clone the Repo</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Clone the public extension repository from any terminal on Windows, macOS, or Linux.</div>
                   </div>
                   <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
                     <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">3</div>
-                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Load the Extension</div>
-                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Install it in Chrome, Edge or Brave, then restart the browser so the extension side panel is available.</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Load Unpacked</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Open `chrome://extensions`, enable Developer mode, and load the cloned repository as an unpacked extension.</div>
                   </div>
                   <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
                     <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">4</div>
@@ -2874,10 +2870,35 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                     <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Open supported sites and use wallet, chat, inspector and WhiteOwl browser context tools directly in-page.</div>
                   </div>
                 </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <a href="/extension/WhiteOwl.crx" class="btn btn-ghost btn-sm" style="text-decoration:none">Download .crx</a>
-                  <a href="/extension/update.xml" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" style="text-decoration:none">Open update.xml</a>
-                  <a href="/extension/uninstall.bat" download="WhiteOwl-uninstall.bat" class="btn btn-danger btn-sm" style="text-decoration:none">Uninstall Extension</a>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                  <div style="font-size:.78rem;font-weight:700;color:var(--fg)">Clone Commands</div>
+                  <div style="font-size:.68rem;color:var(--muted)">Clone first, then load the unpacked folder in Chrome, Edge, or Brave.</div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+                  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px 14px 12px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+                      <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800">Windows</div>
+                      <button type="button" class="btn btn-ghost btn-sm" onclick="copyExtensionCloneCommand('windows')">Copy</button>
+                    </div>
+                    <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:.72rem;line-height:1.55;color:var(--text2);white-space:pre-wrap;word-break:break-word">git clone https://github.com/whiteowl-engine/WhiteOwl-Extension.git
+Set-Location WhiteOwl-Extension</pre>
+                  </div>
+                  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px 14px 12px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+                      <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800">macOS</div>
+                      <button type="button" class="btn btn-ghost btn-sm" onclick="copyExtensionCloneCommand('mac')">Copy</button>
+                    </div>
+                    <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:.72rem;line-height:1.55;color:var(--text2);white-space:pre-wrap;word-break:break-word">git clone https://github.com/whiteowl-engine/WhiteOwl-Extension.git
+cd WhiteOwl-Extension</pre>
+                  </div>
+                  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px 14px 12px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+                      <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800">Linux</div>
+                      <button type="button" class="btn btn-ghost btn-sm" onclick="copyExtensionCloneCommand('linux')">Copy</button>
+                    </div>
+                    <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:.72rem;line-height:1.55;color:var(--text2);white-space:pre-wrap;word-break:break-word">git clone https://github.com/whiteowl-engine/WhiteOwl-Extension.git
+cd WhiteOwl-Extension</pre>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2901,7 +2922,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                 <div class="card-b" style="display:grid;gap:10px">
                   <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Wallet + side panel</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">Browser-native wallet flows, chat surface, token context and quick actions inside the extension panel.</span></div>
                   <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Inspector + page capture</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">Select and capture real page fragments, then route them back into the WhiteOwl desk for analysis and action.</span></div>
-                  <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Repo + releases</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">The extension repository is public and versioned separately, with GitHub Releases and package publishing already wired in.</span></div>
+                  <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Repo + clone workflow</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">Clone the public extension repo from Windows, macOS, or Linux, then load it unpacked into your Chromium browser.</span></div>
                 </div>
               </div>
             </div>
@@ -11320,6 +11341,23 @@ function initExtensionTab() {
     }).catch(function() {});
 }
 
+function getExtensionCloneCommand(platform) {
+  var repoUrl = 'https://github.com/whiteowl-engine/WhiteOwl-Extension.git';
+  if (platform === 'windows') return 'git clone ' + repoUrl + '\nSet-Location WhiteOwl-Extension';
+  if (platform === 'mac' || platform === 'linux') return 'git clone ' + repoUrl + '\ncd WhiteOwl-Extension';
+  return 'git clone ' + repoUrl;
+}
+
+function copyExtensionCloneCommand(platform) {
+  var command = getExtensionCloneCommand(platform);
+  if (!command) return;
+  navigator.clipboard.writeText(command).then(function() {
+    toast('Clone command copied!', 'success');
+  }).catch(function() {
+    toast('Copy failed', 'error');
+  });
+}
+
 var chatSelectedBlocks = [];
 var WEB_RECENT_KEY = 'axiom_web_recent';
 
@@ -11435,8 +11473,7 @@ function bpRenderStart() {
 function bpRenderInspector() {
   var wrap = $('#bpInspectorSection');
   if (!wrap) return;
-  var installUrl = location.origin + '/extension/install.bat';
-  var crxUrl = location.origin + '/extension/WhiteOwl.crx';
+  var extensionRepoUrl = 'https://github.com/whiteowl-engine/WhiteOwl-Extension';
   wrap.innerHTML =
     '<div class="bp-start-title" style="display:flex;align-items:center;gap:8px">' +
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
@@ -11447,9 +11484,13 @@ function bpRenderInspector() {
       'Click the \u{1F989} button on any page to select elements for AI context.' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-      '<button class="bp-bookmarklet-btn" onclick="window.open(\'' + esc(installUrl) + '\')" title="Download Windows installer">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-        ' Install Extension' +
+      '<button class="bp-bookmarklet-btn" onclick="window.open(\'' + esc(extensionRepoUrl) + '\')" title="Open extension repository">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>' +
+        ' Open Repo' +
+      '</button>' +
+      '<button class="bp-bookmarklet-btn" onclick="copyExtensionCloneCommand(\'repo\')" title="Copy git clone command">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+        ' Copy Clone' +
       '</button>' +
       '<button class="bp-bookmarklet-btn" style="background:rgba(124,58,237,.12);border-color:#312e81" onclick="injectInspectorOnPage()" title="Test on this page">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>' +
@@ -11457,7 +11498,7 @@ function bpRenderInspector() {
       '</button>' +
     '</div>' +
     '<div style="color:var(--muted2);font-size:.65rem;margin-top:6px">' +
-      'Auto-installs via Chrome policy on Windows. Or <a href="' + esc(crxUrl) + '" style="color:var(--primary);text-decoration:underline">download .crx</a> manually.' +
+      'Clone the extension repo with Git on Windows, macOS, or Linux, then load the unpacked folder from <b>chrome://extensions</b>.' +
     '</div>';
 }
 function bpRenderQuickLinks() {
