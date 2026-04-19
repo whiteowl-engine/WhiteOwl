@@ -934,6 +934,22 @@ async ensureAgents(): Promise<boolean> {
 
       if (freshConfig.agents.length === 0) return false;
 
+      // Apply saved model-config.json (loadConfig doesn't read it)
+      try {
+        if (fs.existsSync(this.modelConfigPath)) {
+          const saved = JSON.parse(fs.readFileSync(this.modelConfigPath, 'utf-8'));
+          if (saved.provider && saved.model) {
+            const savedMc: ModelConfig = { provider: saved.provider as any, model: saved.model };
+            const envKey = Runtime.PROVIDER_ENV_MAP[savedMc.provider];
+            if (envKey && process.env[envKey]) savedMc.apiKey = process.env[envKey];
+            if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+            if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+            for (const ac of freshConfig.agents) ac.model = savedMc;
+            this.logger.info(`ensureAgents: applied saved model ${savedMc.provider}/${savedMc.model}`);
+          }
+        }
+      } catch {}
+
       this.logger.info(`Creating ${freshConfig.agents.length} agents (LLM now available via OAuth/API key)...`);
 
       const privacyConfig: Partial<PrivacyConfig> = this.config.privacy || {};
@@ -963,6 +979,11 @@ async ensureAgents(): Promise<boolean> {
         }
       }
 
+
+      // Sync this.config.agents so createIsolatedRunner() can find agent templates
+      if (this.config.agents.length === 0 && freshConfig.agents.length > 0) {
+        this.config.agents = freshConfig.agents;
+      }
 
       if (freshConfig.agents.length > 0 && this.dailyReport) {
         const firstCfg = freshConfig.agents[0];

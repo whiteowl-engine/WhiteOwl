@@ -7438,7 +7438,7 @@ Example response:
     res.json({ current, available });
   });
 
-  app.post('/api/model/config', (req, res) => {
+  app.post('/api/model/config', async (req, res) => {
     const { provider, model } = req.body;
     if (!provider || !model || typeof provider !== 'string' || typeof model !== 'string') {
       return res.status(400).json({ error: 'provider and model are required' });
@@ -7453,6 +7453,8 @@ Example response:
     }
     try {
       runtime.setModelConfig({ provider, model });
+      // Create agents if they don't exist yet (fresh install: OAuth connected, model selected)
+      await runtime.ensureAgents();
       res.json({ success: true, provider, model });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
