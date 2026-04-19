@@ -1551,10 +1551,10 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           Projects
           <span style="margin-left:auto;font-size:.55rem;padding:2px 6px;border-radius:4px;background:rgba(80,123,158,.12);color:#507b9e;font-weight:700">LOCAL</span>
         </div>
-        <div class="nav-item" style="opacity:.45;pointer-events:none">
+        <div class="nav-item" data-v="extension" onclick="go('extension')">
           <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
           Extension
-          <span style="margin-left:auto;font-size:.55rem;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--muted);font-weight:700">SOON</span>
+          <span style="margin-left:auto;font-size:.55rem;padding:2px 6px;border-radius:4px;background:rgba(80,123,158,.12);color:#507b9e;font-weight:700">LIVE</span>
         </div>
         <div class="nav-item" data-v="terminal" onclick="go('terminal')">
           <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -2790,82 +2790,123 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
       </div>
 
       <div class="view" id="v-extension">
-        <div style="max-width:860px;margin:0 auto">
-          <div style="display:flex;align-items:center;gap:14px;margin-bottom:28px">
-            <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#507b9e,#3e6382);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 6px 24px rgba(192,132,24,.3)">
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-            </div>
-            <div style="flex:1">
-              <h2 style="font-size:1.35rem;font-weight:800;color:var(--fg);margin:0">WhiteOwl Overlay for pump.fun</h2>
-              <p style="color:var(--muted);font-size:.8125rem;margin:4px 0 0">AI-powered overlay for pump.fun, Trenches, and more</p>
-            </div>
-            <div id="extStatusBadge" style="padding:6px 14px;border-radius:8px;font-size:.75rem;font-weight:700;background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.25)">&#9679; Not Installed</div>
-          </div>
+        <div style="max-width:1100px;margin:0 auto;display:grid;gap:16px">
+          <div class="card" style="overflow:hidden">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0;align-items:stretch">
+              <div style="padding:30px 30px 28px;display:flex;flex-direction:column;gap:16px;justify-content:center">
+                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                  <div style="width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#507b9e,#2c4b66);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 10px 30px rgba(80,123,158,.22)">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:220px">
+                    <div style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:.65rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Companion Extension</div>
+                    <h2 style="font-size:1.5rem;font-weight:800;color:var(--fg);margin:0 0 6px">WhiteOwl Extension</h2>
+                    <p style="color:var(--muted);font-size:.84rem;line-height:1.65;margin:0;max-width:60ch">Browser wallet, side panel, provider bridge, inspector and on-page WhiteOwl context layer. The panel runs the runtime and backend, while the extension lives next to the market page and feeds live browser context back into the desk.</p>
+                  </div>
+                  <div id="extStatusBadge" style="padding:7px 14px;border-radius:999px;font-size:.75rem;font-weight:700;background:rgba(245,158,11,.12);color:#b45309;border:1px solid rgba(245,158,11,.2)">&#9679; Checking Status</div>
+                </div>
 
-          <div class="card" style="border:1.5px solid rgba(34,197,94,.35);margin-bottom:16px">
-            <div class="card-h" style="display:flex;align-items:center;gap:10px">
-              <h3 style="flex:1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Quick Install</h3>
-              <span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:.6875rem;padding:3px 10px;border-radius:6px;font-weight:700">Windows</span>
-            </div>
-            <div class="card-b">
-              <p style="color:var(--muted);font-size:.8125rem;margin-bottom:18px;line-height:1.6">Install the WhiteOwl browser extension to get AI-powered trading overlay directly on pump.fun. Works with Chrome, Edge and Brave.</p>
-              <a id="extBatDownload" href="/extension/install.bat" download="WhiteOwl-install.bat" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:16px 28px;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border-radius:12px;font-weight:800;font-size:1rem;text-decoration:none;transition:all .2s;box-shadow:0 4px 20px rgba(34,197,94,.35);margin-bottom:20px" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Download & Install</a>
-              <div style="display:flex;gap:12px;margin-bottom:18px">
-                <div style="flex:1;background:var(--bg2);border-radius:12px;padding:16px;text-align:center">
-                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(34,197,94,.12);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800;margin:0 auto 8px">1</div>
-                  <div style="font-size:.8125rem;font-weight:600;color:var(--fg);margin-bottom:4px">Download the Installer</div>
-                  <div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Click the button above to download the .bat installer file</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap">
+                  <a href="https://github.com/whiteowl-engine/WhiteOwl-Extension" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="text-decoration:none">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                    Open Extension Repo
+                  </a>
+                  <a href="https://github.com/whiteowl-engine/WhiteOwl-Extension/releases/latest" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" style="text-decoration:none">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Latest Release
+                  </a>
+                  <a id="extBatDownload" href="/extension/install.bat" download="WhiteOwl-install.bat" class="btn btn-success" style="text-decoration:none">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Windows Installer
+                  </a>
                 </div>
-                <div style="flex:1;background:var(--bg2);border-radius:12px;padding:16px;text-align:center">
-                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(34,197,94,.12);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800;margin:0 auto 8px">2</div>
-                  <div style="font-size:.8125rem;font-weight:600;color:var(--fg);margin-bottom:4px">Run the Installer</div>
-                  <div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Run the downloaded .bat file to install the extension in Chrome and auto-configure the connection</div>
-                </div>
-                <div style="flex:1;background:var(--bg2);border-radius:12px;padding:16px;text-align:center">
-                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(34,197,94,.12);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800;margin:0 auto 8px">3</div>
-                  <div style="font-size:.8125rem;font-weight:600;color:var(--fg);margin-bottom:4px">Open pump.fun</div>
-                  <div style="font-size:.6875rem;color:var(--muted);line-height:1.4">WhiteOwl overlay will appear automatically on pump.fun pages with AI-powered trading tools</div>
-                </div>
-              </div>
-              <div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:10px;padding:10px 14px;font-size:.75rem;color:var(--muted);line-height:1.5">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 2a4 4 0 014 4c0 1.95-2 3-2 8h-4c0-5-2-6.05-2-8a4 4 0 014-4z"/><path d="M10 18h4"/><path d="M10 22h4"/></svg> The extension connects automatically to WhiteOwl server and provides AI overlay on pump.fun. <strong style="color:var(--fg)">Requires a browser relaunch</strong> after install. Supported browsers: <strong style="color:var(--fg)">Chrome</strong>, <strong style="color:var(--fg)">Edge</strong>, <strong style="color:var(--fg)">Brave</strong>.
-              </div>
-            </div>
-          </div>
 
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-h"><h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg> Technical Info</h3></div>
-            <div class="card-b">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-                <div style="background:var(--bg2);border-radius:10px;padding:12px 14px">
-                  <div style="font-size:.6875rem;color:var(--muted);margin-bottom:4px">Extension ID</div>
-                  <div id="extIdValue" style="font-family:monospace;font-size:.8125rem;color:var(--primary);word-break:break-all">Not available</div>
-                </div>
-                <div style="background:var(--bg2);border-radius:10px;padding:12px 14px">
-                  <div style="font-size:.6875rem;color:var(--muted);margin-bottom:4px">Server URL</div>
-                  <div id="extServerUrl" style="font-family:monospace;font-size:.8125rem;color:var(--primary)">Not available</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+                  <div style="background:var(--bg2);border-radius:16px;padding:14px 15px;border:1px solid var(--border)">
+                    <div style="font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:5px">Connects</div>
+                    <div style="font-size:.96rem;font-weight:800;color:var(--fg)">Panel + Browser</div>
+                  </div>
+                  <div style="background:var(--bg2);border-radius:16px;padding:14px 15px;border:1px solid var(--border)">
+                    <div style="font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:5px">Ships</div>
+                    <div style="font-size:.96rem;font-weight:800;color:var(--fg)">Wallet + Inspector</div>
+                  </div>
+                  <div style="background:var(--bg2);border-radius:16px;padding:14px 15px;border:1px solid var(--border)">
+                    <div style="font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:5px">Works On</div>
+                    <div style="font-size:.96rem;font-weight:800;color:var(--fg)">Chrome, Edge, Brave</div>
+                  </div>
                 </div>
               </div>
-              <div style="display:flex;gap:8px">
-                <a href="/extension/uninstall.bat" download="WhiteOwl-uninstall.bat" style="padding:8px 16px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2);border-radius:8px;font-size:.75rem;font-weight:600;text-decoration:none;transition:all .2s">Uninstall Extension</a>
-                <a href="/extension/WhiteOwl.crx" style="padding:8px 16px;background:var(--bg2);color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:.75rem;font-weight:600;text-decoration:none">Download .crx</a>
-                <a href="/extension/update.xml" target="_blank" style="padding:8px 16px;background:var(--bg2);color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:.75rem;font-weight:600;text-decoration:none">update.xml</a>
+
+              <div style="padding:18px;background:linear-gradient(180deg,#eef3f7 0%,#e6ebf0 100%);border-left:1px solid var(--border)">
+                <div style="height:100%;display:flex;flex-direction:column;gap:10px;justify-content:center">
+                  <div style="overflow:hidden;border-radius:24px;background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.8);box-shadow:0 18px 40px rgba(80,123,158,.12)">
+                    <video src="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/ex.mp4" poster="https://raw.githubusercontent.com/whiteowl-engine/WhiteOwl-Extension/main/screenshots/chat-surface.png" controls autoplay muted loop playsinline style="display:block;width:100%;height:auto;background:#ebe7df"></video>
+                  </div>
+                  <div style="font-size:.72rem;color:var(--muted);line-height:1.5;text-align:center">Live product preview from the WhiteOwl-Extension repository.</div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-h"><h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Extension Features</h3></div>
-            <div class="card-b">
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">AI Chat</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Chat with WhiteOwl AI assistant directly on pump.fun</div></div>
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">Token Analysis</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Score, rug risk, holder analysis and security checks for any token</div></div>
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">Live Alerts</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Trenches-style alerts with auto-buy capability</div></div>
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">Quick Actions</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Trenches-style quick buy, sell, and snipe actions</div></div>
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">Project Rating</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Shield-based trust score and project safety rating</div></div>
-                <div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;margin-bottom:6px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div><div style="font-size:.8125rem;font-weight:600;margin-bottom:4px">WebSocket</div><div style="font-size:.6875rem;color:var(--muted);line-height:1.4">Real-time connection to WhiteOwl server for live data</div></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start">
+            <div class="card">
+              <div class="card-h"><h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M22 12h-4l-3 8-4-16-3 8H2"/></svg> Installation Flow</h3></div>
+              <div class="card-b">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+                  <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
+                    <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">1</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Start WhiteOwl</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Keep the main panel running locally so the extension can talk to the WhiteOwl backend.</div>
+                  </div>
+                  <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
+                    <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">2</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Get the Build</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Use the Windows installer here or download the latest release from the extension repository.</div>
+                  </div>
+                  <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
+                    <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">3</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Load the Extension</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Install it in Chrome, Edge or Brave, then restart the browser so the extension side panel is available.</div>
+                  </div>
+                  <div style="background:var(--bg2);border-radius:14px;padding:15px 14px;border:1px solid var(--border)">
+                    <div style="width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;margin-bottom:10px">4</div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--fg);margin-bottom:5px">Use the Side Panel</div>
+                    <div style="font-size:.7rem;color:var(--muted);line-height:1.45">Open supported sites and use wallet, chat, inspector and WhiteOwl browser context tools directly in-page.</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <a href="/extension/WhiteOwl.crx" class="btn btn-ghost btn-sm" style="text-decoration:none">Download .crx</a>
+                  <a href="/extension/update.xml" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" style="text-decoration:none">Open update.xml</a>
+                  <a href="/extension/uninstall.bat" download="WhiteOwl-uninstall.bat" class="btn btn-danger btn-sm" style="text-decoration:none">Uninstall Extension</a>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:grid;gap:16px">
+              <div class="card">
+                <div class="card-h"><h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg> Connection Details</h3></div>
+                <div class="card-b">
+                  <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:12px">
+                    <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)">
+                      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">Extension ID</div>
+                      <div id="extIdValue" style="font-family:monospace;font-size:.8rem;color:var(--primary);word-break:break-all">Not available</div>
+                    </div>
+                    <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)">
+                      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">Server URL</div>
+                      <div id="extServerUrl" style="font-family:monospace;font-size:.8rem;color:var(--primary)">Not available</div>
+                    </div>
+                  </div>
+                  <div style="font-size:.72rem;color:var(--muted);line-height:1.6">The extension is the browser-native layer of WhiteOwl. It complements the panel by carrying the wallet, provider bridge, site approvals, inspector and side panel UI directly next to the page you are trading on.</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-h"><h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M12 4h9"/><path d="M4 9h16"/><path d="M4 15h16"/></svg> What You Get</h3></div>
+                <div class="card-b" style="display:grid;gap:10px">
+                  <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Wallet + side panel</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">Browser-native wallet flows, chat surface, token context and quick actions inside the extension panel.</span></div>
+                  <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Inspector + page capture</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">Select and capture real page fragments, then route them back into the WhiteOwl desk for analysis and action.</span></div>
+                  <div style="background:var(--bg2);border-radius:12px;padding:12px 14px;border:1px solid var(--border)"><strong style="display:block;color:var(--fg);font-size:.8rem;margin-bottom:4px">Repo + releases</strong><span style="font-size:.72rem;color:var(--muted);line-height:1.5">The extension repository is public and versioned separately, with GitHub Releases and package publishing already wired in.</span></div>
+                </div>
               </div>
             </div>
           </div>
