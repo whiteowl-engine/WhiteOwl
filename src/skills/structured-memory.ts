@@ -186,9 +186,6 @@ export class StructuredMemorySkill implements Skill {
     if (!fs.existsSync(INDEX_PATH)) {
       fs.writeFileSync(INDEX_PATH, [
         '# MEMORY INDEX',
-        '<!-- Auto-maintained by autoDream. Each line ≤150 chars. Format: [topic-file] one-line summary -->',
-        '<!-- This file is ALWAYS loaded into system prompt. Keep it lean. -->',
-        '<!-- Write to topic file FIRST, then update this index. -->',
         '',
         '## Trading Patterns',
         '',

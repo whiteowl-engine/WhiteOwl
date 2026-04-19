@@ -808,7 +808,7 @@ private selectRelevantTools(
       'skill-hub': ['hub', 'skill hub', 'import skill', 'export skill', 'share skill'],
       'projects': ['project', 'code', 'build', 'file', 'folder', 'directory', 'todo', 'task', 'coding', 'html', 'css', 'javascript', 'python', 'typescript', 'react', 'npm', 'install', 'execute', 'run', 'write code', 'create file', 'script', 'sandbox', 'compile', 'run code', 'git', 'commit', 'branch', 'stash', 'diff', 'grep', 'glob', 'diagnostics', 'typecheck', 'lint', 'error'],
       'terminal': ['terminal', 'console', 'shell', 'command line', 'stdout', 'stderr', 'log output', 'build output', 'npm run', 'server log', 'process'],
-      'background-jobs': ['background', 'job', 'schedule', 'recurring', 'periodic', 'monitor for', 'watch for', 'track for', 'every.*min', 'background task', 'cron'],
+      'background-jobs': ['background job', 'create job', 'schedule job', 'recurring', 'periodic', 'every.*min', 'every.*hour', 'for.*minutes', 'for.*hour', 'background task', 'cron', 'keep checking'],
     };
 
     const skillScores: Record<string, number> = {};
@@ -881,7 +881,7 @@ private selectRelevantTools(
     }
 
 
-    if (/background|job|schedule|monitor.*for|watch.*for|track.*for|periodic|recurring/i.test(ctx)) {
+    if (/\d+\s*(min|hour|h)|every\s*\d|for\s*\d+\s*(min|hour)|background\s*job|create.*job|periodic|recurring|keep\s*check/i.test(ctx)) {
       skillScores['background-jobs'] = (skillScores['background-jobs'] || 0) + 25;
     }
 
@@ -2213,6 +2213,9 @@ private async processLLMCycle(action: string, userContent: string): Promise<stri
       if (errMsg.includes('timed out')) {
         return 'The AI model took too long to respond. Please try again.';
       }
+      if (errMsg.includes('LLM unavailable') || errMsg.includes('LLM providers failed')) {
+        return 'LLM unavailable — local model is not running. Start Ollama or configure a model in Settings.';
+      }
       return errMsg ? `Error: ${errMsg}` : 'An unknown error occurred. Please try again.';
     }
   }
@@ -2881,6 +2884,16 @@ Reply ONLY with JSON: {"tools": ["tool_name_1", "tool_name_2"]}`;
         const hookResult = await this.hooks.beforeToolCall(name, params);
         if (hookResult?.skip) return { skipped: true, reason: 'Hook skipped tool call' };
         if (hookResult?.params) Object.assign(params, hookResult.params);
+      }
+
+      if (name === 'create_background_job') {
+        const lastUserMsg = [...this.conversationHistory].reverse().find(m => m.role === 'user');
+        const uTxt = (lastUserMsg?.content || '').toLowerCase();
+        const hasTimePattern = /\d+\s*(min|hour|h)|every\s*\d|for\s+\d+\s*(min|hour)|keep\s*check|periodic|recurring|create.*job|start.*job|run.*job|background/i.test(uTxt);
+        if (!hasTimePattern) {
+          this.logger.info(`[Jobs] Blocked spurious job creation — no time/duration in user message`);
+          return { error: 'Job not created — use tools directly for one-time requests. Only create jobs when the user explicitly asks for periodic/repeated monitoring with a time duration.' };
+        }
       }
 
       const result = await this.skills.executeTool(name, params);

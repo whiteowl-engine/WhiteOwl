@@ -299,12 +299,15 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
     _wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) try { c.send(msg); } catch {} });
   }
 
+  let _gmgnFallbackFailed = false;
+
   function connectGmgnTwitterWs(forcedUrl?: string) {
     try {
 
       if (forcedUrl && _gmgnWs) {
         try { _gmgnWs.removeAllListeners(); _gmgnWs.close(); } catch {}
         _gmgnWs = null;
+        _gmgnFallbackFailed = false;
       }
       if (_gmgnWs && (_gmgnWs.readyState === WebSocket.OPEN || _gmgnWs.readyState === WebSocket.CONNECTING)) return;
 
@@ -312,6 +315,7 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
       const relayActive = _capturedGmgnWsTime > Date.now() - 30000 && _gmgnTwitterBuffer.length > 0;
 
       let wsUrl: string;
+      let isFallback = false;
       if (forcedUrl) {
         wsUrl = forcedUrl;
         logger.info('[GMGN-WS] Connecting with captured URL from extension...');
@@ -325,6 +329,8 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
           logger.info('[GMGN-WS] Extension relay active, skipping direct WS connection');
           return;
         }
+        if (_gmgnFallbackFailed) return;
+        isFallback = true;
         const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Stockholm';
         const tzOffset = -new Date().getTimezoneOffset() * 60;
         const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -354,6 +360,11 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
           'Origin': 'https://gmgn.ai',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         }
+      });
+
+      _gmgnWs.on('error', (err: Error) => {
+        logger.error('[GMGN-WS] Error:', err.message);
+        if (isFallback) _gmgnFallbackFailed = true;
       });
 
       _gmgnWs.on('open', () => {
@@ -399,6 +410,11 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
       _gmgnWs.on('close', () => {
         _gmgnWs = null;
 
+        if (isFallback && _gmgnFallbackFailed) {
+          logger.info('[GMGN-WS] Fallback params rejected, not retrying. Waiting for extension URL.');
+          return;
+        }
+
         const relayFresh = _capturedGmgnWsTime > Date.now() - 30000;
         if (relayFresh) {
           logger.info('[GMGN-WS] Direct WS closed but extension relay is active, deferring reconnect');
@@ -406,13 +422,10 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
         } else {
           logger.info('[GMGN-WS] Disconnected, reconnecting in ' + Math.round(_gmgnWsBackoff/1000) + 's...');
           setTimeout(connectGmgnTwitterWs, _gmgnWsBackoff);
-          _gmgnWsBackoff = Math.min(_gmgnWsBackoff * 1.5, 30000);
+          _gmgnWsBackoff = Math.min(_gmgnWsBackoff * 1.5, 120000);
         }
       });
 
-      _gmgnWs.on('error', (err: Error) => {
-        logger.error('[GMGN-WS] Error:', err.message);
-      });
     } catch (err: any) {
       logger.error('[GMGN-WS] Connect failed:', err.message);
       setTimeout(connectGmgnTwitterWs, _gmgnWsBackoff);
@@ -5623,7 +5636,10 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       }
 
 
-      const feed = merged.slice(0, limit).map((t: any) => {
+      const tokenStore = runtime.getMemory().getTokenStore();
+      const now = Date.now();
+
+      const enriched = merged.slice(0, limit).map((t: any) => {
         const act = activity[t.mint] || {};
         const act5m = act['5m'] || {};
         const act1h = act['1h'] || {};
@@ -5662,6 +5678,34 @@ Respond ONLY with valid JSON (no markdown, no code fences):
         };
       });
 
+      const feed = enriched.filter((t: any) => {
+        const vol1h = t.activity?.['1h']?.volume || 0;
+        const vol5m = t.activity?.['5m']?.volume || 0;
+        const mcap = t.marketCap || 0;
+        const ageMs = now - (t.createdAt || now);
+        const ageHours = ageMs / 3_600_000;
+        if (ageHours > 168 && (vol1h < 50_000 || mcap < 500_000)) return false;
+        if (ageHours > 48 && (vol1h < 10_000 || mcap < 100_000)) return false;
+        if (ageHours > 24 && vol1h < 5_000 && mcap < 50_000) return false;
+        if (vol1h < 100 && vol5m < 10 && mcap < 5_000) return false;
+        return true;
+      });
+
+      for (const t of feed) {
+        try {
+          tokenStore.store({
+            mint: t.mint, name: t.name || '', symbol: t.symbol || '',
+            description: '', image: t.image || '',
+            twitter: t.twitter || '', telegram: t.telegram || '',
+            website: t.website || '', dev: t.dev || '',
+            createdAt: t.createdAt || now,
+            bondingCurveProgress: t.bondingCurveProgress || 0,
+            marketCap: t.marketCap || 0, volume24h: 0,
+            holders: 0, price: t.price || 0,
+          });
+        } catch {}
+      }
+
       res.json({ period, count: feed.length, feed });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5682,9 +5726,9 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   app.get('/api/tokens/:mint', async (req, res) => {
     const mint = req.params.mint;
     let token = runtime.getMemory().getToken(mint);
+    const needsEnrich = !token || !token.volume24h || !token.holders || (!token.twitter && !token.telegram);
 
-
-    if (!token || (!token.marketCap && !token.volume24h)) {
+    if (needsEnrich) {
 
 
       try {
@@ -5830,6 +5874,56 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       } catch (err) {
         logger.warn(`GMGN processing failed for ${mint}: ${err}`);
       }
+    }
+
+    if (!token || !token.volume24h || !token.holders || (!token.twitter && !token.telegram)) {
+      try {
+        const dexRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(mint)}`, {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (dexRes.ok) {
+          const dexData = await dexRes.json() as any;
+          const pair = dexData?.pairs?.[0];
+          if (pair) {
+            const baseToken = pair.baseToken || {};
+            const socials = pair.info?.socials || [];
+            const dexTwitter = socials.find((s: any) => s.type === 'twitter')?.url || '';
+            const dexTelegram = socials.find((s: any) => s.type === 'telegram')?.url || '';
+            const dexWebsite = pair.info?.websites?.[0]?.url || '';
+            const dexVol24 = pair.volume?.h24 || 0;
+            const dexMcap = pair.marketCap || pair.fdv || 0;
+            const dexPrice = parseFloat(pair.priceUsd) || 0;
+            if (token) {
+              if (!token.volume24h && dexVol24) token.volume24h = dexVol24;
+              if (!token.twitter && dexTwitter) token.twitter = dexTwitter;
+              if (!token.telegram && dexTelegram) token.telegram = dexTelegram;
+              if (!token.website && dexWebsite) token.website = dexWebsite;
+              if (dexMcap && dexMcap > (token.marketCap || 0)) token.marketCap = dexMcap;
+              if (dexPrice) token.price = dexPrice;
+            } else {
+              token = {
+                mint: baseToken.address || mint,
+                name: baseToken.name || '',
+                symbol: baseToken.symbol || '',
+                description: '',
+                image: pair.info?.imageUrl || '',
+                twitter: dexTwitter,
+                telegram: dexTelegram,
+                website: dexWebsite,
+                dev: '',
+                createdAt: pair.pairCreatedAt || Date.now(),
+                bondingCurveProgress: 100,
+                marketCap: dexMcap,
+                volume24h: dexVol24,
+                holders: 0,
+                price: dexPrice,
+              };
+            }
+            runtime.getMemory().getTokenStore().store(token);
+          }
+        }
+      } catch {}
     }
 
     if (!token) return res.status(404).json({ error: 'Token not found' });
@@ -8067,7 +8161,7 @@ if not exist "%EXT_DIR%" mkdir "%EXT_DIR%"\r
 curl -s -o "%EXT_DIR%\\content.js" "%WhiteOwl_URL%/extension/inject.js"\r
 curl -s -o "%EXT_DIR%\\icon48.png" "%WhiteOwl_URL%/extension/static/icon48.png"\r
 curl -s -o "%EXT_DIR%\\icon128.png" "%WhiteOwl_URL%/extension/static/icon128.png"\r
->"%EXT_DIR%\\manifest.json" echo {"manifest_version":3,"name":"WhiteOwl","version":"1.0.0","description":"AI overlay","host_permissions":["https://pump.fun/*","https://www.pump.fun/*"],"content_scripts":[{"matches":["https://pump.fun/*","https://www.pump.fun/*"],"js":["content.js"],"run_at":"document_idle","world":"MAIN"}],"icons":{"48":"icon48.png","128":"icon128.png"}}\r
+>"%EXT_DIR%\\manifest.json" echo {"manifest_version":3,"name":"WhiteOwl","version":"1.0.1","description":"AI overlay","host_permissions":["https://pump.fun/*","https://www.pump.fun/*"],"content_scripts":[{"matches":["https://pump.fun/*","https://www.pump.fun/*"],"js":["content.js"],"run_at":"document_idle","world":"MAIN"}],"icons":{"48":"icon48.png","128":"icon128.png"}}\r
 echo  Saved to: %EXT_DIR%\r
 \r
 echo  [3/4] Setting browser policies (HKLM + HKCU + External)...\r

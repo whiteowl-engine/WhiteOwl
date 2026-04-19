@@ -2,6 +2,7 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 
 export interface BrowserStatus {
   running: boolean;
@@ -58,7 +59,7 @@ export class BrowserService {
     const hasAuth = cookies.some(c => c.name === 'auth-access-token' || c.name === 'auth-refresh-token');
     if (hasAuth) {
       this.axiomConnected = true;
-      this.logger.info(`[Browser] Axiom cookies synced from extension (${cookies.length} cookies, auth ✓)`);
+      this.logger.debug(`[Browser] Axiom cookies synced from extension (${cookies.length} cookies, auth ✓)`);
     }
   }
 
@@ -83,7 +84,7 @@ setAxiomAuthHeaders(headers: Record<string, string>) {
       this.axiomCookiesUpdatedAt = Date.now();
     }
     this.axiomConnected = true;
-    this.logger.info(`[Browser] Axiom auth headers captured from browser (keys: ${Object.keys(headers).join(', ')})`);
+    this.logger.debug(`[Browser] Axiom auth headers captured from browser (keys: ${Object.keys(headers).join(', ')})`);
   }
 
 hasAxiomAuthHeaders(): boolean {
@@ -177,10 +178,8 @@ async captureAxiomCookiesViaCDP(): Promise<boolean> {
       const pages = await this.mainBrowser.pages();
       page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
       if (!page) {
-
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        this.logger.debug('[Browser] No axiom.trade tab open — skipping CDP cookie capture');
+        return false;
       }
 
       const cdp = await page.createCDPSession();
@@ -391,6 +390,29 @@ async axiomDirectFetch(url: string): Promise<any> {
       return null;
     }
     return resp.json();
+  }
+
+async getAxiomHeadlessPage(url: string, waitSelector?: string, timeout = 15000): Promise<Page> {
+    const browser = await this.getHeadlessBrowser();
+    const page = await browser.newPage();
+    try {
+      const cookies = this.axiomCookies.map(c => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain || '.axiom.trade',
+        path: c.path || '/',
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+      }));
+      if (cookies.length) await page.setCookie(...cookies);
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      if (waitSelector) await page.waitForSelector(waitSelector, { timeout }).catch(() => {});
+      await new Promise(r => setTimeout(r, 3000));
+      return page;
+    } catch (err) {
+      await page.close().catch(() => {});
+      throw err;
+    }
   }
 
 private async getHeadlessBrowser(): Promise<Browser> {
@@ -985,56 +1007,100 @@ async searchTwitter(query: string, maxResults = 20): Promise<any[]> {
 
 async detectMainBrowser(): Promise<{ available: boolean; browser?: string; wsEndpoint?: string }> {
     const host = BrowserService.CDP_HOST;
-
-
-    const dataDirs = [
-      path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data'),
-      path.join(process.env.LOCALAPPDATA || '', 'Google', 'ChromeDebug'),
+    const localAppData = process.env.LOCALAPPDATA || '';
+    const appData = process.env.APPDATA || '';
+    const dataDirs: { name: string; dir: string }[] = [
+      { name: 'Chrome', dir: path.join(localAppData, 'Google', 'Chrome', 'User Data') },
+      { name: 'Chrome', dir: path.join(localAppData, 'Google', 'ChromeDebug') },
+      { name: 'Edge', dir: path.join(localAppData, 'Microsoft', 'Edge', 'User Data') },
+      { name: 'Brave', dir: path.join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+      { name: 'Opera', dir: path.join(appData, 'Opera Software', 'Opera Stable') },
+      { name: 'Opera GX', dir: path.join(appData, 'Opera Software', 'Opera GX Stable') },
+      { name: 'Vivaldi', dir: path.join(localAppData, 'Vivaldi', 'User Data') },
+      { name: 'Chromium', dir: path.join(localAppData, 'Chromium', 'User Data') },
     ];
-    for (const chromeUserData of dataDirs) {
-      try {
-        const portFile = path.join(chromeUserData, 'DevToolsActivePort');
 
-      if (fs.existsSync(portFile)) {
+    for (const { name, dir } of dataDirs) {
+      try {
+        const portFile = path.join(dir, 'DevToolsActivePort');
+        if (!fs.existsSync(portFile)) continue;
         const content = fs.readFileSync(portFile, 'utf-8').trim();
         const lines = content.split('\n');
-        if (lines.length >= 2) {
-          const port = parseInt(lines[0].trim(), 10);
-          const wsPath = lines[1].trim();
-          if (port && wsPath.startsWith('/devtools/browser/')) {
+        if (lines.length < 2) continue;
+        const port = parseInt(lines[0].trim(), 10);
+        const wsPath = lines[1].trim();
+        if (!port || !wsPath.startsWith('/devtools/browser/')) continue;
 
-
-                        const httpOk = await fetch(`http://${host}:${port}/json/version`, {
-              signal: AbortSignal.timeout(1500),
-            }).then(r => r.ok).catch(() => false);
-            if (httpOk) {
-              const wsEndpoint = `ws://${host}:${port}${wsPath}`;
-              return { available: true, browser: 'Chrome', wsEndpoint };
-            }
-
-            this.logger.debug(`[Browser] DevToolsActivePort found (port ${port}) but HTTP /json/version not available — this is chrome://inspect, not --remote-debugging-port`);
-          }
+        const httpOk = await fetch(`http://${host}:${port}/json/version`, {
+          signal: AbortSignal.timeout(1500),
+        }).then(r => r.ok).catch(() => false);
+        if (httpOk) {
+          const wsEndpoint = `ws://${host}:${port}${wsPath}`;
+          this.logger.info(`[Browser] CDP auto-detected via DevToolsActivePort: ${name} on port ${port}`);
+          return { available: true, browser: name, wsEndpoint };
         }
-      }
+        this.logger.debug(`[Browser] DevToolsActivePort found for ${name} (port ${port}) but HTTP /json/version not available`);
       } catch {  }
     }
 
-    const probePorts = [9222, 9229, 9333];
+    const probePorts = [9222, 9229, 9333, 9515, 9223, 9224, 9225];
     for (const port of probePorts) {
-      try {
-                const resp = await fetch(`http://${host}:${port}/json/version`, {
-          signal: AbortSignal.timeout(1500),
-        });
-        if (resp.ok) {
-          const info = await resp.json() as any;
-          if (info.webSocketDebuggerUrl) {
-            return { available: true, browser: info.Browser || 'Chrome', wsEndpoint: info.webSocketDebuggerUrl };
-          }
-        }
-      } catch {  }
+      const result = await this.tryCdpPort(host, port);
+      if (result) return result;
+    }
+
+    const dynamicPorts = this.getListeningPorts();
+    const skip = new Set([...probePorts, 80, 443, 3377, 3388, 3390, 11434]);
+    for (const port of dynamicPorts) {
+      if (skip.has(port)) continue;
+      const result = await this.tryCdpPort(host, port);
+      if (result) {
+        this.logger.info(`[Browser] CDP auto-discovered on dynamic port ${port}`);
+        return result;
+      }
     }
 
     return { available: false };
+  }
+
+  private async tryCdpPort(host: string, port: number): Promise<{ available: boolean; browser: string; wsEndpoint: string } | null> {
+    try {
+      const resp = await fetch(`http://${host}:${port}/json/version`, {
+        signal: AbortSignal.timeout(1200),
+      });
+      if (resp.ok) {
+        const info = await resp.json() as any;
+        if (info.webSocketDebuggerUrl) {
+          return { available: true, browser: info.Browser || 'Unknown', wsEndpoint: info.webSocketDebuggerUrl };
+        }
+      }
+    } catch {  }
+    return null;
+  }
+
+  private getListeningPorts(): number[] {
+    try {
+      if (process.platform === 'win32') {
+        const out = execSync(
+          'powershell -NoProfile -Command "Get-NetTCPConnection -State Listen | Select-Object -ExpandProperty LocalPort | Sort-Object -Unique"',
+          { timeout: 5000, encoding: 'utf-8' }
+        );
+        return out.trim().split(/\r?\n/).map(s => parseInt(s.trim(), 10)).filter(p => p > 1024 && p < 65536);
+      } else {
+        const out = execSync(
+          "ss -tlnH 2>/dev/null || netstat -tlnp 2>/dev/null | awk '{print $4}'",
+          { timeout: 5000, encoding: 'utf-8' }
+        );
+        const ports = new Set<number>();
+        for (const line of out.trim().split('\n')) {
+          const m = line.match(/:(\d+)\s*$/);
+          if (m) { const p = parseInt(m[1], 10); if (p > 1024 && p < 65536) ports.add(p); }
+        }
+        return [...ports].sort((a, b) => a - b);
+      }
+    } catch {
+      return [];
+    }
   }
 
 async connectMainBrowser(): Promise<{ success: boolean; message: string; twitterLoggedIn?: boolean }> {
@@ -1060,7 +1126,7 @@ async connectMainBrowser(): Promise<{ success: boolean; message: string; twitter
         }
         return {
           success: false,
-          message: 'Chrome CDP not available — reconnect loop started. Will auto-connect when Chrome starts with --remote-debugging-port=9222.'
+          message: 'Chrome CDP not available — reconnect loop started. Will auto-detect when any Chromium browser starts with remote debugging enabled.'
         };
       }
 
@@ -1211,101 +1277,54 @@ async connectAxiom(): Promise<{ success: boolean; message: string; loggedIn?: bo
   }
 
   async checkAxiomSession(): Promise<boolean> {
-    if (!this.mainBrowser?.connected) return false;
-    let page: Page | null = null;
-    let created = false;
-    try {
-      const pages = await this.mainBrowser.pages();
-      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
-      if (!page) {
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
-      const loggedIn = await page.evaluate(`(function() {
-        return !!(document.querySelector('[class*="wallet"]') || document.querySelector('[class*="account"]') || document.cookie.indexOf('session') !== -1);
-      })()`);
-      if (created && page) await page.close().catch(() => {});
-      return loggedIn;
-    } catch (err: any) {
-      this.logger.warn('[Browser] Axiom session check failed:', err.message);
-      if (created && page) try { await page.close(); } catch {}
-      return false;
+    if (this.hasAxiomCookies() || this.hasAxiomAuthHeaders()) {
+      try {
+        const data = await this.axiomDirectFetch(`https://api.axiom.trade/lighthouse?v=${Date.now()}`);
+        if (data != null) return true;
+      } catch {}
     }
+    if (this.mainBrowser?.connected) {
+      const captured = await this.captureAxiomCookiesViaCDP();
+      if (captured) return true;
+    }
+    return false;
   }
 
 async scrapeAxiomToken(mint: string): Promise<any> {
-    if (!this.mainBrowser?.connected) {
-      return { error: 'Chrome not connected. Connect via Settings → Browser first.' };
-    }
-    let page: Page | null = null;
     try {
-
       const pairAddr = await this.resolveAxiomPair(mint) || mint;
-      page = await this.mainBrowser.newPage();
-      await page.goto(`https://axiom.trade/meme/${pairAddr}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForSelector('table, [class*="trader"], [class*="holder"]', { timeout: 15000 }).catch(() => {});
-
-      await new Promise(r => setTimeout(r, 3000));
-
-      const data = await page.evaluate(`(function() {
-        var results = { topTraders: [], influencers: [], raw: '' };
-        var rows = document.querySelectorAll('table tbody tr, [class*="trader-row"], [class*="holder-row"]');
-        rows.forEach(function(row) {
-          var cells = row.querySelectorAll('td, [class*="cell"]');
-          var texts = Array.from(cells).map(function(c) { return c.innerText ? c.innerText.trim() : ''; }).filter(Boolean);
-          if (texts.length >= 2) {
-            results.topTraders.push({
-              wallet: texts[0] || '',
-              pnl: texts[1] || '',
-              bought: texts[2] || '',
-              sold: texts[3] || '',
-              extra: texts.slice(4).join(' | '),
-            });
-          }
-        });
-        var badges = document.querySelectorAll('[class*="influencer"], [class*="kol"], [class*="notable"], [class*="smart"]');
-        badges.forEach(function(b) {
-          results.influencers.push(b.innerText ? b.innerText.trim() : '');
-        });
-        results.raw = (document.body && document.body.innerText || '').slice(0, 8000);
-        return results;
-      })()`);
-
-      await page.close().catch(() => {});
-      return { mint, source: 'axiom', ...data };
+      const base = 'https://api.axiom.trade';
+      const v = Date.now();
+      const [topTraders, batchData] = await Promise.all([
+        this.axiomDirectFetch(`${base}/top-traders-v5?pairAddress=${pairAddr}&onlyTrackedWallets=false&v=${v}`),
+        this.axiomBatchTokenDataDirect(pairAddr),
+      ]);
+      return {
+        mint,
+        source: 'axiom',
+        topTraders: Array.isArray(topTraders) ? topTraders : [],
+        influencers: [],
+        ...(batchData || {}),
+      };
     } catch (err: any) {
-      if (page) try { await page.close(); } catch {}
       return { error: err.message, mint, source: 'axiom' };
     }
   }
 
   async axiomApiFetch(url: string): Promise<any> {
-    if (!this.mainBrowser?.connected) return null;
-    let page: Page | null = null;
-    let created = false;
-    try {
-      const pages = await this.mainBrowser.pages();
-      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
-      if (!page) {
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
-      const result = await page.evaluate(`(async () => {
-        try {
-          const res = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-          if (!res.ok) return null;
-          return await res.json();
-        } catch { return null; }
-      })()`);
-      if (created && page) await page.close().catch(() => {});
-      return result;
-    } catch (err: any) {
-      this.logger.warn(`[Browser] axiomApiFetch failed: ${err.message}`);
-      if (created && page) try { await page.close(); } catch {}
-      return null;
+    if (this.hasAxiomCookies() || this.hasAxiomAuthHeaders()) {
+      try {
+        const data = await this.axiomDirectFetch(url);
+        if (data != null) return data;
+      } catch {}
     }
+    if (this.mainBrowser?.connected) {
+      await this.captureAxiomCookiesViaCDP();
+      if (this.hasAxiomCookies() || this.hasAxiomAuthHeaders()) {
+        try { return await this.axiomDirectFetch(url); } catch {}
+      }
+    }
+    return null;
   }
 
 
@@ -1314,68 +1333,18 @@ async scrapeAxiomToken(mint: string): Promise<any> {
 
 async resolveAxiomPair(mint: string): Promise<string | null> {
 
-    if (!this.mainBrowser?.connected) {
-      if (!this.hasAxiomCookies() && !this.hasAxiomAuthHeaders()) return null;
-      return this.resolveAxiomPairDirect(mint);
-    }
-
     const cached = this.pairAddressCache.get(mint);
     if (cached && Date.now() - cached.ts < BrowserService.PAIR_CACHE_TTL) return cached.pair;
 
-    let page: Page | null = null;
-    let created = false;
-    try {
-      const pages = await this.mainBrowser.pages();
-      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
-      this.logger.debug(`[Browser] resolveAxiomPair: found axiom page=${!!page}, pages=${pages.length}`);
-      if (!page) {
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
+    const direct = await this.resolveAxiomPairDirect(mint);
+    if (direct) return direct;
 
-      const pairAddress = await page.evaluate(`(async () => {
-        try {
-          const tokenMint = ${JSON.stringify(mint)};
-          const v = Date.now();
-          var domains = ['api.axiom.trade', 'api10.axiom.trade', 'api9.axiom.trade'];
-          for (var i = 0; i < domains.length; i++) {
-            try {
-              var url = 'https://' + domains[i] + '/search-v4?searchQuery=' + tokenMint + '&isOg=false&isPumpSearch=false&isBonkSearch=false&isBagsSearch=false&isUsd1Search=false&onlyBonded=false&sortBy=trending&v=' + v;
-              var r = await fetch(url, { credentials: 'include' });
-              if (!r.ok) continue;
-              var data = await r.json();
-              if (Array.isArray(data) && data.length > 0) {
-                var match = data.find(function(d) { return d.tokenAddress === tokenMint; });
-                if (match && match.pairAddress) return match.pairAddress;
-                if (data[0] && data[0].pairAddress) return data[0].pairAddress;
-              }
-            } catch(e) { continue; }
-          }
-          return null;
-        } catch(e) { return null; }
-      })()`) as string | null;
-
-      if (created && page) await page.close().catch(() => {});
-
-      if (pairAddress) {
-        this.pairAddressCache.set(mint, { pair: pairAddress, ts: Date.now() });
-        this.logger.debug(`[Browser] Resolved pair for ${mint.slice(0, 8)}…: ${pairAddress.slice(0, 8)}…`);
-      }
-
-      if (!pairAddress && (this.hasAxiomCookies() || this.hasAxiomAuthHeaders())) {
-        this.logger.debug('[Browser] CDP pair resolve returned null, trying direct fetch...');
-        return this.resolveAxiomPairDirect(mint);
-      }
-      return pairAddress;
-    } catch (err: any) {
-      this.logger.warn(`[Browser] resolveAxiomPair CDP failed: ${err.message}`);
-      if (created && page) try { await page.close(); } catch {}
-      if (this.hasAxiomCookies() || this.hasAxiomAuthHeaders()) {
-        return this.resolveAxiomPairDirect(mint);
-      }
-      return null;
+    if (this.mainBrowser?.connected && !this.hasAxiomCookies() && !this.hasAxiomAuthHeaders()) {
+      await this.captureAxiomCookiesViaCDP();
+      return this.resolveAxiomPairDirect(mint);
     }
+
+    return null;
   }
 
 private async resolveAxiomPairDirect(mint: string): Promise<string | null> {
@@ -1415,66 +1384,15 @@ async axiomBatchTokenData(pairAddress: string): Promise<{
     holderData: any[];
   } | null> {
 
-    if (!this.mainBrowser?.connected) {
-      if (!this.hasAxiomCookies()) return null;
+    const direct = await this.axiomBatchTokenDataDirect(pairAddress);
+    if (direct?.tokenInfo || direct?.pairInfo) return direct;
+
+    if (this.mainBrowser?.connected && !this.hasAxiomCookies() && !this.hasAxiomAuthHeaders()) {
+      await this.captureAxiomCookiesViaCDP();
       return this.axiomBatchTokenDataDirect(pairAddress);
     }
-    let page: Page | null = null;
-    let created = false;
-    try {
-      const pages = await this.mainBrowser.pages();
-      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
-      if (!page) {
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
 
-      const v = Date.now();
-
-      const result = await page.evaluate(`(async () => {
-        const base = 'https://api.axiom.trade';
-        const pair = ${JSON.stringify(pairAddress)};
-        const ts = ${v};
-        const _doFetch = async (url) => {
-          try {
-            const r = await fetch(url, { credentials: 'include' });
-            return r.ok ? await r.json() : null;
-          } catch { return null; }
-        };
-        const [tokenInfo, pairInfo, kolTxns, sniperTxns, holderData] = await Promise.all([
-          _doFetch(base + '/token-info?pairAddress=' + pair + '&v=' + ts),
-          _doFetch(base + '/pair-info?pairAddress=' + pair + '&v=' + (ts + 1)),
-          _doFetch(base + '/kol-transactions-v2?pairAddress=' + pair + '&v=' + (ts + 2)),
-          _doFetch(base + '/sniper-transactions?pairAddress=' + pair + '&v=' + (ts + 3)),
-          _doFetch(base + '/holder-data-v5?pairAddress=' + pair + '&v=' + (ts + 4)),
-        ]);
-        let tokenAnalysis = null;
-        if (pairInfo && pairInfo.deployerAddress && pairInfo.tokenTicker) {
-          tokenAnalysis = await _doFetch(
-            base + '/token-analysis?devAddress=' + pairInfo.deployerAddress + '&tokenTicker=' + encodeURIComponent(pairInfo.tokenTicker) + '&pairAddress=' + pair + '&v=' + (ts + 5)
-          );
-        }
-        return { tokenInfo, pairInfo, tokenAnalysis, kolTxns: kolTxns || [], sniperTxns: sniperTxns || [], holderData: holderData || [] };
-      })()`);
-
-      if (created && page) await page.close().catch(() => {});
-
-      if (!result?.tokenInfo && !result?.pairInfo && this.hasAxiomCookies()) {
-        this.logger.debug('[Browser] CDP returned empty Axiom data, trying direct fetch with cookies...');
-        return this.axiomBatchTokenDataDirect(pairAddress);
-      }
-      return result;
-    } catch (err: any) {
-      this.logger.warn(`[Browser] axiomBatchTokenData CDP failed: ${err.message}`);
-      if (created && page) try { await page.close(); } catch {}
-
-      if (this.hasAxiomCookies()) {
-        this.logger.debug('[Browser] Falling back to direct fetch with cookies...');
-        return this.axiomBatchTokenDataDirect(pairAddress);
-      }
-      return null;
-    }
+    return null;
   }
 
 private async axiomBatchTokenDataDirect(pairAddress: string): Promise<{
@@ -1505,27 +1423,19 @@ private async axiomBatchTokenDataDirect(pairAddress: string): Promise<{
 
 async extractAxiomCookies(): Promise<string | null> {
     if (!this.mainBrowser?.connected) return null;
-    let page: Page | null = null;
-    let created = false;
     try {
       const pages = await this.mainBrowser.pages();
-      page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
-      if (!page) {
-        page = await this.mainBrowser.newPage();
-        created = true;
-        await page.goto('https://axiom.trade', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
+      const page = pages.find(p => { try { return p.url().includes('axiom.trade'); } catch { return false; } }) || null;
+      if (!page) return null;
       const client = await page.createCDPSession();
       const { cookies } = await client.send('Network.getCookies', {
         urls: ['https://axiom.trade', 'https://api.axiom.trade'],
       }) as any;
       await client.detach();
-      if (created && page) await page.close().catch(() => {});
       if (!cookies?.length) return null;
       return cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
     } catch (err: any) {
       this.logger.warn(`[Browser] extractAxiomCookies failed: ${err.message}`);
-      if (created && page) try { await page.close(); } catch {}
       return null;
     }
   }

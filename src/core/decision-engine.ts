@@ -253,7 +253,7 @@ Be concise, data-driven, and actionable. Use bullet points.`,
         const response = await this.llm.chat(messages);
         return `# WhiteOwl Daily Report — ${new Date().toISOString().split('T')[0]}\n\n${response.content}\n\n---\n\n## Raw Data\n${dataContext}`;
       } catch (err: any) {
-        this.logger.warn(`LLM report failed, using structured format: ${err.message}`);
+        this.logger.warn(`LLM report failed, using structured format`);
       }
     }
 

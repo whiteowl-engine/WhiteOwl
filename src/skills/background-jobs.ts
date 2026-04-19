@@ -13,7 +13,7 @@ export class BackgroundJobsSkill implements Skill {
     tools: [
       {
         name: 'create_background_job',
-        description: 'Create a background job that runs periodically. MUST USE when user says: "watch", "monitor", "track", "create job", or any request for periodic/repeated checking. Examples: "watch Twitter for 15 min", "monitor token every 5 min", "check wallet every hour". The prompt is executed every interval_minutes for duration_minutes total time. Set max_runs=1 for a single execution. IMPORTANT: If a job with the same name already exists and is active, it will NOT be duplicated — you will get the existing job back. Do NOT create multiple jobs for the same task.',
+        description: 'Create a PERIODIC background job. ONLY use when the user specifies a TIME DURATION or REPEAT interval — phrases like "for 15 minutes", "every 5 min", "for 1 hour", "keep checking for 30 min", "create a job". NEVER use for one-time requests like "check token", "show trending", "what is hot", "analyze this" — answer those directly with other tools. If no time/duration is mentioned, do NOT create a job. The prompt runs every interval_minutes for duration_minutes total. IMPORTANT: duplicate jobs are rejected automatically.',
         parameters: {
           type: 'object',
           properties: {

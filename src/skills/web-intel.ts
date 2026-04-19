@@ -1,6 +1,6 @@
 
 import { Skill, SkillManifest, SkillContext, LoggerInterface } from '../types.ts';
-import { axiomResolvePair } from './axiom-api.ts';
+import { axiomResolvePair, axiomTopTraders } from './axiom-api.ts';
 
 export class WebIntelSkill implements Skill {
   manifest: SkillManifest = {
@@ -211,19 +211,7 @@ export class WebIntelSkill implements Skill {
   }
 
   private async axiomPage(url: string, waitSelector: string, timeout = 15000): Promise<any> {
-    const mainBrowser = this.browser.mainBrowser;
-    if (!mainBrowser?.connected) throw new Error('Browser disconnected');
-    const page = await mainBrowser.newPage();
-    try {
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-      await page.waitForSelector(waitSelector, { timeout }).catch(() => {});
-
-      await new Promise(r => setTimeout(r, 3000));
-      return page;
-    } catch (err) {
-      await page.close().catch(() => {});
-      throw err;
-    }
+    return this.browser.getAxiomHeadlessPage(url, waitSelector, timeout);
   }
 
   private async axiomGetTrending(tab?: string, timeframe?: string): Promise<any> {
@@ -302,37 +290,13 @@ export class WebIntelSkill implements Skill {
   private async axiomGetToken(mint: string): Promise<any> {
     const err = this.ensureAxiom();
     if (err) return { error: err };
-    let page: any = null;
     try {
-      const { url, mint: resolvedMint } = await this.resolveAxiomUrl(mint);
-      page = await this.axiomPage(
-        url,
-        '[class*="chart"], [class*="price"], [class*="trade"], [class*="token"]',
-        15000
-      );
-
-
-      const maxPollMs = 15000;
-      const pollInterval = 1500;
-      const pollStart = Date.now();
-      let hasContent = false;
-      while (Date.now() - pollStart < maxPollMs) {
-        hasContent = await page.evaluate(() => {
-          const text = document.body?.innerText || '';
-
-          return /\$[\d,.]+[KMB]?/i.test(text) && /(vol|volume|buy|sell|trade|holder|liquidity)/i.test(text);
-        }).catch(() => false);
-        if (hasContent) break;
-        await new Promise(r => setTimeout(r, pollInterval));
-      }
-
-      const data = await page.evaluate(() => {
-        return { content: (document.body?.innerText || '').substring(0, 10000), source: 'axiom_token' };
-      });
-      await page.close().catch(() => {});
-      return { mint: resolvedMint, ...data };
+      const pair = await axiomResolvePair(mint);
+      if (!pair) return { error: 'Could not resolve pair address', mint, source: 'axiom_token' };
+      const data = await this.browser.axiomBatchTokenData(pair);
+      if (!data) return { error: 'No data returned from API', mint, source: 'axiom_token' };
+      return { mint, pairAddress: pair, ...data, source: 'axiom_token' };
     } catch (e: any) {
-      if (page) await page.close().catch(() => {});
       return { error: e.message, mint, source: 'axiom_token' };
     }
   }
@@ -340,8 +304,14 @@ export class WebIntelSkill implements Skill {
   private async axiomGetTopTraders(mint: string): Promise<any> {
     const err = this.ensureAxiom();
     if (err) return { error: err };
-
-    return this.browser.scrapeAxiomToken(mint);
+    try {
+      const pair = await axiomResolvePair(mint);
+      if (!pair) return { error: 'Could not resolve pair address', mint, source: 'axiom_top_traders' };
+      const topTraders = await axiomTopTraders(pair);
+      return { mint, pairAddress: pair, topTraders: topTraders || [], source: 'axiom_top_traders' };
+    } catch (e: any) {
+      return { error: e.message, mint, source: 'axiom_top_traders' };
+    }
   }
 
   private async axiomGetPulse(): Promise<any> {

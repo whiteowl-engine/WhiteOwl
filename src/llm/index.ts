@@ -199,7 +199,7 @@ export class FallbackLLMProvider implements LLMProvider {
     for (const idx of order) {
 
       if (isProviderCoolingDown(this.configs[idx])) {
-        console.warn(`[failover] Skipping ${this.names[idx]} (in cooldown)`);
+        if (process.env.DEBUG_LLM) console.warn(`[failover] Skipping ${this.names[idx]} (in cooldown)`);
         continue;
       }
 
@@ -211,7 +211,7 @@ export class FallbackLLMProvider implements LLMProvider {
       } catch (err: any) {
         lastError = err;
         const errMsg = String(err?.message || '');
-        console.warn(`[failover] ${this.names[idx]} failed: ${errMsg.slice(0, 150)}`);
+        if (process.env.DEBUG_LLM) console.warn(`[failover] ${this.names[idx]} failed: ${errMsg.slice(0, 150)}`);
 
 
         if (isBillingError(err)) {
@@ -223,7 +223,7 @@ export class FallbackLLMProvider implements LLMProvider {
         if (isNotFoundError(err)) {
           const fallbackModel = getForwardCompatFallback(this.configs[idx].model);
           if (fallbackModel) {
-            console.warn(`[failover] 404 → forward-compat fallback: ${this.configs[idx].model} → ${fallbackModel}`);
+            if (process.env.DEBUG_LLM) console.warn(`[failover] 404 → forward-compat fallback: ${this.configs[idx].model} → ${fallbackModel}`);
             try {
               const fallbackConfig = { ...this.configs[idx], model: fallbackModel };
               const fallbackProvider = createLLMProvider(fallbackConfig);
@@ -235,7 +235,7 @@ export class FallbackLLMProvider implements LLMProvider {
               this.lastSuccessIndex = idx;
               return result;
             } catch (e2: any) {
-              console.warn(`[failover] Forward-compat fallback also failed: ${String(e2?.message || '').slice(0, 100)}`);
+              if (process.env.DEBUG_LLM) console.warn(`[failover] Forward-compat fallback also failed: ${String(e2?.message || '').slice(0, 100)}`);
             }
           }
           continue;
@@ -251,7 +251,7 @@ export class FallbackLLMProvider implements LLMProvider {
       }
     }
 
-    throw new Error(`All ${this.providers.length} LLM providers failed. Last error: ${lastError?.message}`);
+    throw new Error('LLM unavailable — local model is not running or not reachable. Start Ollama or check your model settings.');
   }
 
   async *stream(messages: LLMMessage[], tools?: LLMTool[], options?: Record<string, any>): AsyncGenerator<LLMStreamChunk> {
@@ -282,7 +282,7 @@ export class FallbackLLMProvider implements LLMProvider {
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`[failover] stream ${this.names[idx]} failed: ${String(err?.message || '').slice(0, 150)}`);
+        if (process.env.DEBUG_LLM) console.warn(`[failover] stream ${this.names[idx]} failed: ${String(err?.message || '').slice(0, 150)}`);
 
         if (isBillingError(err) || isRateLimitError(err) || isAuthError(err)) {
           markProviderCooldown(this.configs[idx], err);
@@ -290,7 +290,7 @@ export class FallbackLLMProvider implements LLMProvider {
       }
     }
 
-    throw new Error(`All LLM providers failed streaming. Last error: ${lastError?.message}`);
+    throw new Error('LLM unavailable — local model is not running or not reachable. Start Ollama or check your model settings.');
   }
 }
 
