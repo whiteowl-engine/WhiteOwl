@@ -26,7 +26,6 @@
   <a href="#highlights">Highlights</a> •
   <a href="#companion-extension">Extension</a> •
   <a href="#dashboard-surfaces">Dashboard</a> •
-  <a href="#screenshots">Screenshots</a> •
   <a href="#skill-system">Skills</a> •
   <a href="#api">API</a>
 </p>
@@ -151,41 +150,6 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | **Projects** | Local AI project workspace with file management |
 | **Terminal** | Built-in terminal with AI Agent and manual tabs |
 | **Settings** | RPC configuration, OAuth / AI model selection, browser CDP connection, system health |
-
-## Screenshots
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="./screenshots/dashboard.png" alt="WhiteOwl Dashboard" width="100%">
-      <p><strong>Dashboard</strong><br>Main overview with P&L stats, total trades, win rate, active positions, session info, recent trades table, and AI decision explanations.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="./screenshots/news-feed.png" alt="WhiteOwl News Feed" width="100%">
-      <p><strong>News Feed</strong><br>Multi-source news aggregation with category filters (Crypto, Politics, Biz, Tech, Solana, DeFi, Meme) from Reddit, Hacker News, Decrypt, and more.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="./screenshots/skills-tools.png" alt="WhiteOwl Skills & Tools" width="100%">
-      <p><strong>Skills & Tools</strong><br>29 plugin skills with 208+ tools organized by category: Market Intel, Trading, Analysis, Portfolio, Other. Each skill shows tool count, version, and description.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="./screenshots/ai-chat.png" alt="WhiteOwl AI Chat" width="100%">
-      <p><strong>AI Chat</strong><br>Multi-agent operator console with model switching, auto-approve controls, streamed reasoning, and persistent conversation sessions.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="./screenshots/sidebar.png" alt="WhiteOwl Sidebar" width="100%">
-      <p><strong>Navigation Sidebar</strong><br>Quick access to all panel surfaces: Dashboard, AI Chat, Portfolio, Wallet, Tokens, AI Activity, Live Events, News, X Tracker, Agents, Jobs, Shit Trader, Skills, Projects, Extension, and Settings.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="./screenshots/customize-ui.png" alt="WhiteOwl Customize UI" width="100%">
-      <p><strong>Customize UI</strong><br>Flexible customization controls: sidebar width, content padding, border radius, navigation page toggles, and dashboard widget visibility settings.</p>
-    </td>
-  </tr>
-</table>
 
 ## Skill System
 
