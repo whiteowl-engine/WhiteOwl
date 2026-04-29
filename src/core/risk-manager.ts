@@ -15,11 +15,29 @@ interface RiskState {
   consecutiveLosses: number;
   cooldownUntil: number;
   emergencyStopped: boolean;
+
+  announcementTradesToday: number;
+  announcementExposureSol: number;
+  announcementDayStart: number;
 }
+
+export interface AnnouncementRiskLimits {
+  maxAnnouncementTradesPerDay: number;
+  maxAnnouncementExposureSol: number;
+  announcementStopLossPercent: number;
+}
+
+const DEFAULT_ANNOUNCEMENT_LIMITS: AnnouncementRiskLimits = {
+  maxAnnouncementTradesPerDay: 5,
+  maxAnnouncementExposureSol: 2.0,
+  announcementStopLossPercent: 30,
+};
 
 export class RiskManager {
   private globalLimits: AgentRiskLimits & { emergencyStopLossSol: number };
   private agentLimits = new Map<string, AgentRiskLimits>();
+  private announcementLimits: AnnouncementRiskLimits = { ...DEFAULT_ANNOUNCEMENT_LIMITS };
+  private announcementMints = new Set<string>();
   private state: RiskState;
   private logger: LoggerInterface;
   private eventBus: EventBusInterface;
@@ -42,6 +60,9 @@ export class RiskManager {
       consecutiveLosses: 0,
       cooldownUntil: 0,
       emergencyStopped: false,
+      announcementTradesToday: 0,
+      announcementExposureSol: 0,
+      announcementDayStart: this.startOfDay(),
     };
 
     this.bindEvents();
@@ -49,6 +70,28 @@ export class RiskManager {
 
   setAgentLimits(agentId: string, limits: AgentRiskLimits): void {
     this.agentLimits.set(agentId, limits);
+  }
+
+  setAnnouncementLimits(limits: Partial<AnnouncementRiskLimits>): void {
+    this.announcementLimits = { ...this.announcementLimits, ...limits };
+    this.logger.info(
+      `[Risk] Announcement limits: ${this.announcementLimits.maxAnnouncementTradesPerDay}/day, ` +
+        `${this.announcementLimits.maxAnnouncementExposureSol} SOL exposure, ` +
+        `${this.announcementLimits.announcementStopLossPercent}% SL`
+    );
+  }
+
+  getAnnouncementLimits(): AnnouncementRiskLimits {
+    return { ...this.announcementLimits };
+  }
+
+  getAnnouncementState(): { tradesToday: number; exposureSol: number; trackedMints: number } {
+    this.resetAnnouncementDayIfNeeded();
+    return {
+      tradesToday: this.state.announcementTradesToday,
+      exposureSol: this.state.announcementExposureSol,
+      trackedMints: this.announcementMints.size,
+    };
   }
 
   validateIntent(intent: TradeIntent): { approved: boolean; reason?: string } {
@@ -74,6 +117,15 @@ export class RiskManager {
   private validateBuy(intent: TradeIntent): { approved: boolean; reason?: string } {
     const amount = intent.amountSol || 0;
     const limits = this.getEffectiveLimits(intent.agentId);
+
+    const isAnnouncement =
+      intent.origin === 'announcement' ||
+      intent.agentId === 'announcement-sniper' ||
+      (intent.tags || []).includes('announcement');
+    if (isAnnouncement) {
+      const annCheck = this.validateAnnouncementBuy(amount);
+      if (!annCheck.approved) return annCheck;
+    }
 
 
     if (amount > limits.maxPositionSol) {
@@ -141,6 +193,7 @@ export class RiskManager {
 
   closePosition(mint: string, pnl: number): void {
     this.state.openPositions = this.state.openPositions.filter(p => p.mint !== mint);
+    this.announcementMints.delete(mint);
 
     if (pnl < 0) {
       this.state.dailyLoss += Math.abs(pnl);
@@ -192,6 +245,62 @@ export class RiskManager {
     this.logger.info('Emergency stop reset');
   }
 
+  markMintAsAnnouncement(mint: string): void {
+    this.announcementMints.add(mint);
+  }
+
+  isAnnouncementMint(mint: string): boolean {
+    return this.announcementMints.has(mint);
+  }
+
+  getAnnouncementStopLossPercent(): number {
+    return this.announcementLimits.announcementStopLossPercent;
+  }
+
+  private validateAnnouncementBuy(amount: number): { approved: boolean; reason?: string } {
+    this.resetAnnouncementDayIfNeeded();
+    const lim = this.announcementLimits;
+    if (this.state.announcementTradesToday >= lim.maxAnnouncementTradesPerDay) {
+      this.emitLimitHit(
+        'announcement_daily_trades',
+        this.state.announcementTradesToday,
+        lim.maxAnnouncementTradesPerDay
+      );
+      return {
+        approved: false,
+        reason: `Announcement daily trade cap (${lim.maxAnnouncementTradesPerDay}) reached`,
+      };
+    }
+    if (this.state.announcementExposureSol + amount > lim.maxAnnouncementExposureSol) {
+      this.emitLimitHit(
+        'announcement_exposure',
+        this.state.announcementExposureSol + amount,
+        lim.maxAnnouncementExposureSol
+      );
+      return {
+        approved: false,
+        reason: `Announcement exposure ${(this.state.announcementExposureSol + amount).toFixed(2)} SOL exceeds limit ${lim.maxAnnouncementExposureSol} SOL`,
+      };
+    }
+    return { approved: true };
+  }
+
+  recordAnnouncementTrade(mint: string, amountSol: number): void {
+    this.resetAnnouncementDayIfNeeded();
+    this.announcementMints.add(mint);
+    this.state.announcementTradesToday++;
+    this.state.announcementExposureSol += amountSol;
+  }
+
+  private resetAnnouncementDayIfNeeded(): void {
+    const today = this.startOfDay();
+    if (today > this.state.announcementDayStart) {
+      this.state.announcementDayStart = today;
+      this.state.announcementTradesToday = 0;
+    }
+  }
+
+
   private getEffectiveLimits(agentId: string): AgentRiskLimits {
     const agentLimits = this.agentLimits.get(agentId);
     if (!agentLimits) return this.globalLimits;
@@ -209,6 +318,9 @@ export class RiskManager {
       (sum, p) => sum + p.amountSolInvested,
       0
     );
+    this.state.announcementExposureSol = this.state.openPositions
+      .filter(p => this.announcementMints.has(p.mint))
+      .reduce((sum, p) => sum + p.amountSolInvested, 0);
   }
 
   private emitLimitHit(type: string, current: number, max: number): void {
@@ -223,6 +335,11 @@ export class RiskManager {
       this.checkPositionStopLoss(pos);
     });
     this.eventBus.on('position:closed', ({ mint, pnl }) => this.closePosition(mint, pnl));
+    this.eventBus.on('announcement:detected' as any, (det: any) => {
+      if (det?.mint && typeof det.mint === 'string' && det.score >= 85) {
+        this.announcementMints.add(det.mint);
+      }
+    });
   }
 
 

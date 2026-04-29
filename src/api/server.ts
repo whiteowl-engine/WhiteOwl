@@ -725,6 +725,171 @@ export function createAPIServer(runtime: Runtime, port: number, logger: LoggerIn
   });
 
 
+  const getAnnouncementSkill = () =>
+    runtime.getSkillLoader().getSkill('announcement-sniper') as any;
+
+  app.get('/api/announcement/status', async (_req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_status', {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/announcement/configure', express.json(), async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_configure', req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/announcement/active', async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      const limit = parseInt(req.query.limit as string) || 20;
+      res.json(await skill.execute('announcement_active', { limit }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/announcement/history', async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      const limit = parseInt(req.query.limit as string) || 50;
+      res.json(await skill.execute('announcement_history', { limit }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/announcement/test', express.json(), async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_test', req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/announcement/skip/:id', async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_skip', { id: req.params.id }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/announcement/approve/:id', express.json(), async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      const sizeSol = typeof req.body?.sizeSol === 'number' ? req.body.sizeSol : undefined;
+      res.json(await skill.execute('announcement_approve', { id: req.params.id, sizeSol }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/announcement/pattern', express.json(), async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_pattern_add', req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/announcement/pattern/:id', async (req, res) => {
+    try {
+      const skill = getAnnouncementSkill();
+      if (!skill) return res.status(503).json({ error: 'announcement-sniper not loaded' });
+      res.json(await skill.execute('announcement_pattern_remove', { id: req.params.id }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  runtime.getEventBus().on('announcement:detected' as any, (data: any) => {
+    if (!_wss) return;
+    const msg = JSON.stringify({ type: 'announcement_detected', data });
+    _wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) try { c.send(msg); } catch {} });
+  });
+
+  const getHL = () => runtime.getSkillLoader().getSkill('hyperliquid-perp') as any;
+
+  app.get('/api/hyperliquid/status', async (_req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_status', {}));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/hyperliquid/configure', express.json(), async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_configure', req.body || {}));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.get('/api/hyperliquid/funding', async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_funding', { coin: req.query.coin }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.get('/api/hyperliquid/mark', async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_mark_price', { coin: req.query.coin }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/hyperliquid/open', express.json(), async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_open', req.body || {}));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/hyperliquid/close/:id', async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_close', { id: req.params.id }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+  app.get('/api/hyperliquid/positions', async (req, res) => {
+    try {
+      const s = getHL();
+      if (!s) return res.status(503).json({ error: 'hyperliquid-perp not loaded' });
+      res.json(await s.execute('hl_positions', { includeClosed: req.query.includeClosed === 'true' }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  runtime.getEventBus().on('hyperliquid:position_opened' as any, (data: any) => {
+    if (!_wss) return;
+    const msg = JSON.stringify({ type: 'hyperliquid_position_opened', data });
+    _wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) try { c.send(msg); } catch {} });
+  });
+  runtime.getEventBus().on('hyperliquid:position_closed' as any, (data: any) => {
+    if (!_wss) return;
+    const msg = JSON.stringify({ type: 'hyperliquid_position_closed', data });
+    _wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) try { c.send(msg); } catch {} });
+  });
+
   const chatResponseStore = new Map<string, {
     status: 'processing' | 'done' | 'error';
     agentId: string;

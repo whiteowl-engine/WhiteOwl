@@ -174,6 +174,20 @@ export class SniperJob {
 
   private tradedMints = new Set<string>();
 
+  private announcementBoosts = new Map<string, { multiplier: number; scoreBoost: number; until: number; label: string; direction: 'long' | 'short' }>();
+  private readonly ANNOUNCEMENT_BOOST_TTL_MS = 15 * 60_000;
+  private announcementMultiplier = 1.5;
+  private announcementMinScore = 85;
+  private announcementStopLossPercent = 30;
+  private allowAnnouncements = true;
+
+  setAnnouncementOptions(opts: { allowAnnouncements?: boolean; multiplier?: number; minScore?: number; stopLossPercent?: number }): void {
+    if (opts.allowAnnouncements !== undefined) this.allowAnnouncements = opts.allowAnnouncements;
+    if (opts.multiplier !== undefined) this.announcementMultiplier = Math.max(1, Math.min(3, opts.multiplier));
+    if (opts.minScore !== undefined) this.announcementMinScore = Math.max(0, Math.min(100, opts.minScore));
+    if (opts.stopLossPercent !== undefined) this.announcementStopLossPercent = Math.max(5, Math.min(80, opts.stopLossPercent));
+  }
+
   private readonly COOLDOWN_LOSSES = 3;
   private readonly COOLDOWN_BASE_MS = 2 * 60_000;
 
@@ -485,6 +499,7 @@ start(): void {
     this.eventBus.on('trenches:alert' as any, this.onTrenchesAlert.bind(this));
     this.eventBus.on('token:new' as any, this.onTokenNew.bind(this));
     this.eventBus.on('trade:executed' as any, this.onTradeExecuted.bind(this));
+    this.eventBus.on('announcement:detected' as any, this.onAnnouncementDetected.bind(this));
 
 
     this.intervalHandle = setInterval(() => {
@@ -747,6 +762,39 @@ getTokenOverlay(): Array<{
     }
   }
 
+  private onAnnouncementDetected(det: any): void {
+    if (!this.running || !this.allowAnnouncements) return;
+    if (!det?.mint || typeof det.mint !== 'string') return;
+    if ((det.score ?? 0) < this.announcementMinScore) return;
+    if (det.direction !== 'long') return; // sniper only opens longs
+
+    const until = Date.now() + this.ANNOUNCEMENT_BOOST_TTL_MS;
+    this.announcementBoosts.set(det.mint, {
+      multiplier: this.announcementMultiplier,
+      scoreBoost: Math.max(15, Math.round((det.score - this.announcementMinScore) / 2) + 15),
+      until,
+      label: det.patternLabel || det.patternId || 'announcement',
+      direction: 'long',
+    });
+    const c = this.candidates.get(det.mint);
+    if (c) {
+      c.score = Math.min(100, c.score + this.announcementBoosts.get(det.mint)!.scoreBoost);
+      this.logger.info(`[Sniper] Announcement boost applied to existing candidate ${c.symbol} (${det.patternLabel}) -> score=${c.score}`);
+    } else {
+      this.logger.info(`[Sniper] Announcement boost armed for ${det.mint.slice(0, 8)}... (${det.patternLabel}) - TTL ${this.ANNOUNCEMENT_BOOST_TTL_MS / 60000}min`);
+    }
+    for (const [m, b] of this.announcementBoosts) {
+      if (b.until < Date.now()) this.announcementBoosts.delete(m);
+    }
+  }
+
+  private applyAnnouncementSL(baseSL: number, candidate: SniperCandidate | null | undefined): number {
+    if (!candidate) return baseSL;
+    const annBoost = (candidate as any)._announcementBoost as { until: number } | undefined;
+    if (!annBoost || annBoost.until < Date.now()) return baseSL;
+    return Math.min(baseSL, this.announcementStopLossPercent);
+  }
+
   private addCandidate(c: SniperCandidate): void {
 
     const nameLower = (c.name + ' ' + c.symbol).toLowerCase();
@@ -759,6 +807,14 @@ getTokenOverlay(): Array<{
 
     c.ageSeconds = 0;
     (c as any)._addedAt = Date.now();
+
+    const boost = this.announcementBoosts.get(c.mint);
+    if (boost && boost.until > Date.now() && boost.direction === 'long') {
+      c.score = Math.min(100, c.score + boost.scoreBoost);
+      (c as any)._announcementBoost = boost;
+      this.logger.info(`[Sniper] Candidate ${c.symbol} carries announcement boost (${boost.label}) -> score=${c.score}`);
+    }
+
     this.candidates.set(c.mint, c);
     this.logger.debug(`[Sniper] Candidate added: ${c.symbol} score=${c.score} — pool size: ${this.candidates.size}`);
 
@@ -1396,6 +1452,17 @@ getTokenOverlay(): Array<{
           buyAmount = Math.min(buyAmount, exposure.availableBalance * 0.30);
           buyAmount = +buyAmount.toFixed(4);
         }
+
+        const annBoost = (best as any)._announcementBoost as { multiplier: number; label: string; until: number } | undefined;
+        if (annBoost && annBoost.until > Date.now()) {
+          const before = buyAmount;
+          buyAmount = +(buyAmount * annBoost.multiplier).toFixed(4);
+          buyAmount = Math.min(buyAmount, exposure.availableBalance * 0.30);
+          buyAmount = +buyAmount.toFixed(4);
+          buyBoostReason += ` (${annBoost.multiplier}x announcement: ${annBoost.label})`;
+          this.logger.info(`[Sniper] Announcement size boost ${before}->${buyAmount} SOL (${annBoost.label})`);
+        }
+
         if (buyAmount >= 0.005 && buyAmount <= (exposure.availableBalance + 0.001)) {
 
           const cachedIx = think.candidates?.find(tc => tc.symbol === best.symbol);
@@ -1643,7 +1710,10 @@ getTokenOverlay(): Array<{
             bondingProgress: candidate?.bondingProgress || 0,
             graduated: false,
             exitSignals: [],
-            dynamicStopLoss: (candidate as any)?._chartStopLoss || this.strategy.stopLossPercent,
+            dynamicStopLoss: this.applyAnnouncementSL(
+              (candidate as any)?._chartStopLoss || this.strategy.stopLossPercent,
+              candidate,
+            ),
             dynamicTpLevels: (candidate as any)?._chartTpLevels || [...this.strategy.takeProfitLevels],
             lastChartAnalysisAt: now,
             lastChartVerdict: 'initial',
@@ -1712,7 +1782,10 @@ getTokenOverlay(): Array<{
               bondingProgress: candidate?.bondingProgress || 0,
               graduated: false,
               exitSignals: [],
-              dynamicStopLoss: (candidate as any)?._chartStopLoss || this.strategy.stopLossPercent,
+              dynamicStopLoss: this.applyAnnouncementSL(
+                (candidate as any)?._chartStopLoss || this.strategy.stopLossPercent,
+                candidate,
+              ),
               dynamicTpLevels: (candidate as any)?._chartTpLevels || [...this.strategy.takeProfitLevels],
               lastChartAnalysisAt: now,
               lastChartVerdict: 'initial',

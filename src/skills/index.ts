@@ -27,6 +27,8 @@ import { TerminalSkill } from './terminal.ts';
 import { BackgroundJobsSkill } from './background-jobs.ts';
 import { NewsSearchSkill } from './news-search.ts';
 import { AxiomApiSkill } from './axiom-api.ts';
+import { AnnouncementSniperSkill } from './announcement-sniper.ts';
+import { HyperliquidPerpSkill } from './hyperliquid-perp.ts';
 import { Skill } from '../types.ts';
 
 export function getAllSkills(): Skill[] {
@@ -60,6 +62,8 @@ export function getAllSkills(): Skill[] {
     new BackgroundJobsSkill(),
     new NewsSearchSkill(),
     new AxiomApiSkill(),
+    new AnnouncementSniperSkill(),
+    new HyperliquidPerpSkill(),
   ];
 }
 
@@ -90,4 +94,5 @@ export {
   InsightXSkill,
   TerminalSkill,
   AxiomApiSkill,
+  AnnouncementSniperSkill,
 };

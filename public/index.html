@@ -179,6 +179,43 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
 .tbl tr:hover td{background:var(--surface2)}
 .tbl .mono{font-family:'JetBrains Mono',monospace;font-size:.75rem}
 
+.ops-shell{display:flex;flex-direction:column;gap:16px}
+.ops-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ops-status-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.ops-dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft);display:inline-block;flex-shrink:0}
+.ops-dot.off{background:var(--muted2);box-shadow:0 0 0 4px var(--surface3)}
+.ops-control-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.ops-control-card{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border:1px solid var(--border);border-radius:18px;background:var(--bg)}
+.ops-control-title{font-size:.84rem;font-weight:700;color:var(--text)}
+.ops-control-copy{font-size:.72rem;color:var(--muted);line-height:1.45;margin-top:3px}
+.ops-live-warn{display:none;color:var(--yellow);background:var(--yellow-soft);border:1px solid rgba(214,158,46,.18);padding:7px 12px;border-radius:12px;font-size:.72rem;font-weight:700}
+.ops-live-warn.show{display:inline-flex}
+.ops-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+.ops-form-grid .btn{height:42px}
+.ops-list{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg);min-height:150px;max-height:560px;overflow-y:auto}
+.ops-empty{display:flex;align-items:center;justify-content:center;min-height:130px;color:var(--muted);font-size:.82rem;text-align:center;padding:24px}
+.ops-detection-row{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 16px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:var(--shadow-sm)}
+.ops-detection-row.long{border-left:4px solid var(--green)}
+.ops-detection-row.short{border-left:4px solid var(--red)}
+.ops-row-mark{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+.ops-score{font-size:1.25rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text)}
+.ops-score.high{color:var(--green)}
+.ops-detection-text{font-size:.84rem;line-height:1.5;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.ops-detection-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px;font-size:.7rem;color:var(--muted)}
+.ops-keyword{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 8px;color:var(--muted)}
+.ops-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.ops-table-wrap{max-height:520px;overflow:auto;background:var(--surface)}
+.ops-table-wrap .tbl td,.ops-table-wrap .tbl th{white-space:nowrap}
+.ops-pnl-pos{color:var(--green);font-weight:700}.ops-pnl-neg{color:var(--red);font-weight:700}
+.ops-muted{color:var(--muted)}
+.ops-two-col{grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr)}
+
+@media (max-width:960px){
+  .ops-two-col{grid-template-columns:1fr}
+  .ops-detection-row{grid-template-columns:1fr;align-items:start}
+  .ops-row-actions{justify-content:flex-start}
+}
+
 .mrow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 .mrow:last-child{border:none}
 .mrow .ml{color:var(--muted2);font-size:.8125rem}
@@ -1532,6 +1569,15 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           Shit Trader
           <span class="nav-badge" id="sniperNavBadge" style="display:none">0</span>
         </div>
+        <div class="nav-item" data-v="announcements" onclick="go('announcements')" title="Announcement Sniper - buybacks, listings, partnerships, exploits">
+          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-5 18-3-7-7-3z"/><path d="M13 13l4 4"/></svg>
+          Announce Sniper
+          <span class="nav-badge" id="annNavBadge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-v="hyperliquid" onclick="go('hyperliquid')" title="Hyperliquid perp adapter (paper)">
+          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
+          HL Perps
+        </div>
       </div>
 
       <div class="nav-group">
@@ -2710,6 +2756,126 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
         </div>
       </div>
 
+      <div class="view" id="v-announcements">
+        <div class="ops-shell">
+          <div class="welcome-bar">
+            <div>
+              <h1><span class="ops-dot" id="annStatusDot"></span> Announcement Sniper</h1>
+              <p id="annStatusText">Loading announcement engine...</p>
+              <div class="ops-status-line">
+                <span class="badge badge-blue" id="annModeBadge">mode</span>
+                <span class="badge badge-purple" id="annScoreBadge">score</span>
+                <span class="ops-live-warn" id="annLiveWarn">LIVE AUTO EXECUTION</span>
+              </div>
+            </div>
+            <div class="ops-header-actions">
+              <button class="btn btn-ghost btn-sm" onclick="loadAnnouncements()">Refresh</button>
+            </div>
+          </div>
+
+          <div class="g g4">
+            <div class="stat s-green"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="s-label">Trades Today</div><div class="s-value" id="annStatTrades">0/0</div><div class="s-sub">announcement risk limit</div></div>
+            <div class="stat s-blue"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div><div class="s-label">Active</div><div class="s-value" id="annStatActive">0</div><div class="s-sub">pending detections</div></div>
+            <div class="stat s-purple"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div><div class="s-label">History</div><div class="s-value" id="annStatHistory">0</div><div class="s-sub">stored detections</div></div>
+            <div class="stat s-yellow"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div class="s-label">Cooldown</div><div class="s-value" id="annStatCooldown">-</div><div class="s-sub" id="annStatSize">position size</div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h3>Execution Controls</h3>
+              <div class="actions"><button class="btn btn-ghost btn-xs" onclick="loadAnnouncements()">Sync</button></div>
+            </div>
+            <div class="card-b">
+              <div class="ops-control-grid">
+                <div class="ops-control-card"><div><div class="ops-control-title">Detector</div><div class="ops-control-copy">Read announcements and score launch-sensitive patterns.</div></div><label class="toggle-switch"><input type="checkbox" id="annEnabledToggle"><span class="toggle-slider"></span></label></div>
+                <div class="ops-control-card"><div><div class="ops-control-title">Paper Mode</div><div class="ops-control-copy">Keep signals simulated until you explicitly switch risk posture.</div></div><label class="toggle-switch"><input type="checkbox" id="annPaperToggle"><span class="toggle-slider"></span></label></div>
+                <div class="ops-control-card"><div><div class="ops-control-title">Auto Execute</div><div class="ops-control-copy">Let detections above threshold emit trade signals automatically.</div></div><label class="toggle-switch"><input type="checkbox" id="annAutoToggle"><span class="toggle-slider"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="g g2 ops-two-col">
+            <div class="card">
+              <div class="card-h"><h3>Active Detections</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="loadAnnouncements()">Refresh</button></div></div>
+              <div class="card-b np"><div class="ops-list" id="annActiveList"><div class="ops-empty">No active detections</div></div></div>
+            </div>
+            <div class="card">
+              <div class="card-h"><h3>History</h3><div class="actions"><span class="badge badge-blue" id="annHistoryBadge">0</span></div></div>
+              <div class="card-b np"><div class="ops-list" id="annHistoryList"><div class="ops-empty">Empty</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="v-hyperliquid">
+        <div class="ops-shell">
+          <div class="welcome-bar">
+            <div>
+              <h1>Hyperliquid Perps</h1>
+              <p id="hlStatusText">Loading Hyperliquid paper adapter...</p>
+              <div class="ops-status-line">
+                <span class="badge badge-yellow" id="hlModeBadge">paper</span>
+                <span class="badge badge-blue" id="hlAnnBadge">announcement shorts off</span>
+              </div>
+            </div>
+            <div class="ops-header-actions">
+              <button class="btn btn-ghost btn-sm" onclick="loadHyperliquid()">Refresh</button>
+            </div>
+          </div>
+
+          <div class="g g4">
+            <div class="stat s-yellow"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3.5 9.74-7 10-3.5-.26-7-5-7-10V6l7-4z"/></svg></div><div class="s-label">Mode</div><div class="s-value" id="hlStatMode">Paper</div><div class="s-sub">live signing disabled</div></div>
+            <div class="stat s-blue"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></div><div class="s-label">Open</div><div class="s-value" id="hlStatOpen">0/0</div><div class="s-sub">paper positions</div></div>
+            <div class="stat s-green"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="s-label">Default Size</div><div class="s-value" id="hlStatSize">$0</div><div class="s-sub">per signal</div></div>
+            <div class="stat s-purple"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-6"/></svg></div><div class="s-label">Leverage</div><div class="s-value" id="hlStatLev">0x</div><div class="s-sub">default paper lev</div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><h3>Controls</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="hlApplyConfig()">Apply Config</button></div></div>
+            <div class="card-b">
+              <div class="ops-control-grid" style="margin-bottom:14px">
+                <div class="ops-control-card"><div><div class="ops-control-title">Auto-short Bearish Announcements</div><div class="ops-control-copy">When enabled, bearish score >= 85 announcements can open paper shorts.</div></div><label class="toggle-switch"><input type="checkbox" id="hlAnnToggle"><span class="toggle-slider"></span></label></div>
+              </div>
+              <div class="ops-form-grid">
+                <div><label class="ops-control-copy">Default size USD</label><input id="hlDefaultSize" type="number" min="1" step="1" placeholder="250"></div>
+                <div><label class="ops-control-copy">Default leverage</label><input id="hlDefaultLev" type="number" min="1" step="1" placeholder="3"></div>
+                <div><label class="ops-control-copy">Max positions</label><input id="hlMaxOpen" type="number" min="1" step="1" placeholder="3"></div>
+                <button class="btn btn-primary" onclick="hlApplyConfig()">Save</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><h3>Manual Paper Open</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="hlPrefillFunding()">Prefill Funding</button></div></div>
+            <div class="card-b">
+              <div class="ops-form-grid">
+                <input id="hlOpenCoin" placeholder="COIN, e.g. BTC">
+                <select id="hlOpenSide"><option value="long">Long</option><option value="short">Short</option></select>
+                <input id="hlOpenSize" type="number" min="1" step="1" placeholder="Size USD">
+                <input id="hlOpenLev" type="number" min="1" step="1" placeholder="Leverage">
+                <input id="hlOpenReason" placeholder="Reason">
+                <button class="btn btn-primary" onclick="hlOpenPosition()">Open Paper Position</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="g g2 ops-two-col">
+            <div class="card">
+              <div class="card-h"><h3>Positions</h3><div class="actions"><button class="btn btn-ghost btn-xs" id="hlClosedToggle" onclick="hlToggleClosed()">Show Closed</button><button class="btn btn-ghost btn-xs" onclick="loadHyperliquid()">Refresh</button></div></div>
+              <div class="card-b np ops-table-wrap">
+                <table class="tbl"><thead><tr><th>Coin</th><th>Side</th><th>Size</th><th>Entry</th><th>Close</th><th>PnL</th><th></th></tr></thead><tbody id="hlPositionsBody"><tr><td colspan="7" class="ops-muted" style="text-align:center;padding:24px">No positions</td></tr></tbody></table>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-h"><h3>Funding Rates</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="loadHyperliquid()">Refresh</button></div></div>
+              <div class="card-b np ops-table-wrap">
+                <table class="tbl"><thead><tr><th>Coin</th><th>Mark</th><th>Funding</th><th>OI</th></tr></thead><tbody id="hlFundingBody"><tr><td colspan="4" class="ops-muted" style="text-align:center;padding:24px">Loading...</td></tr></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="view" id="v-skills">
         <div class="skill-header">
           <h2>
@@ -3024,6 +3190,12 @@ cd WhiteOwl-Extension</pre>
                 <div class="api-key-row"><label>Fireworks</label><input type="password" id="key_fireworks" placeholder="..." autocomplete="off"></div>
                 <div class="api-key-row"><label>SambaNova</label><input type="password" id="key_sambanova" placeholder="..." autocomplete="off"></div>
                 <div class="api-key-row"><label>Ollama URL</label><input type="text" id="key_ollama" placeholder="http://localhost:11434" autocomplete="off"></div>
+                <div style="height:1px;background:var(--border);margin:4px 0"></div>
+                <div style="font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em">Hyperliquid</div>
+                <div class="api-key-row" data-always-visible="true"><label>HL API URL</label><input type="text" id="key_hyperliquid_api_url" placeholder="https://api.hyperliquid.xyz/info" autocomplete="off"></div>
+                <div class="api-key-row" data-always-visible="true"><label>HL Account</label><input type="text" id="key_hyperliquid_account_address" placeholder="0x account address" autocomplete="off"></div>
+                <div class="api-key-row" data-always-visible="true"><label>HL API Wallet</label><input type="text" id="key_hyperliquid_api_wallet_address" placeholder="0x API wallet address" autocomplete="off"></div>
+                <div class="api-key-row" data-always-visible="true"><label>HL Private</label><input type="password" id="key_hyperliquid_private_key" placeholder="0x private key" autocomplete="off"></div>
               </div>
               <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
                 <button class="btn btn-primary btn-sm" onclick="saveApiKeys()">Save Keys</button>
@@ -3499,6 +3671,14 @@ function wsConnect() {
         addTwitterItem(msg.data);
         return;
       }
+      if (msg.type === 'announcement_detected' && msg.data) {
+        if (currentView === 'announcements') loadAnnouncements();
+        return;
+      }
+      if ((msg.type === 'hyperliquid_position_opened' || msg.type === 'hyperliquid_position_closed') && currentView === 'hyperliquid') {
+        loadHyperliquid();
+        return;
+      }
       handleWSEvent(msg);
       if (msg.type && msg.type.indexOf('sniper_') === 0) handleSniperWS(msg);
     } catch(x) {}
@@ -3536,6 +3716,15 @@ function handleWSEvent(msg) {
   if (event === 'risk:emergency') toast('?? Risk Emergency: ' + (data.reason || ''), 'error');
 
   if (event.indexOf('agent:') === 0) addAiLogEntry(event, data, ts);
+
+  if (event === 'announcement:detected') {
+    noteAnnouncementDetected(data);
+    if (currentView === 'announcements') loadAnnouncements();
+  }
+
+  if (event === 'hyperliquid:position_opened' || event === 'hyperliquid:position_closed') {
+    if (currentView === 'hyperliquid') loadHyperliquid();
+  }
 
   if (event.indexOf('job:') === 0) {
     if (currentView === 'jobs') loadJobs();
@@ -4655,8 +4844,336 @@ function go(name) {
   if (name === 'terminal') initTerminalView();
   if (name === 'jobs') loadJobs();
   if (name === 'sniper') loadSniperStatus();
+  if (name === 'announcements') { initAnnouncementsPanel(); loadAnnouncements(); var annBadge = $('#annNavBadge'); if (annBadge) { annBadge.style.display = 'none'; annBadge.textContent = '0'; } }
+  if (name === 'hyperliquid') { initHyperliquidPanel(); loadHyperliquid(); }
   if (name === 'news') loadNews();
   if (name === 'settings') { loadRpcConfig(); loadOAuth(); loadModelConfig(); loadApiKeys(); loadSetupWizard(); loadTwitterConfig(); loadBrowserMode(); loadHealth(); setTimeout(function(){ maybeOpenSetupOnboarding(); }, 250); }
+}
+
+var announcementsPanelBound = false;
+var hyperliquidPanelBound = false;
+var hlShowClosed = false;
+var hlFundingItems = [];
+
+function noteAnnouncementDetected(detection) {
+  var badge = $('#annNavBadge');
+  if (badge && currentView !== 'announcements') {
+    var count = (parseInt(badge.textContent, 10) || 0) + 1;
+    badge.textContent = count;
+    badge.style.display = '';
+  }
+  var label = detection && (detection.symbol || detection.mint || '') ? ' ' + String(detection.symbol || detection.mint).slice(0, 8) : '';
+  toast('Announcement' + label + ' (score ' + ((detection && detection.score) || '-') + ')', 'trade');
+}
+
+function initAnnouncementsPanel() {
+  if (announcementsPanelBound) return;
+  announcementsPanelBound = true;
+  var enabledToggle = $('#annEnabledToggle');
+  var paperToggle = $('#annPaperToggle');
+  var autoToggle = $('#annAutoToggle');
+  if (enabledToggle) enabledToggle.addEventListener('change', function(event) {
+    annConfigure({ enabled: event.target.checked });
+  });
+  if (paperToggle) paperToggle.addEventListener('change', function(event) {
+    if (!event.target.checked && !confirm('Switch Announcement Sniper to LIVE mode? Real funds can be used when signals fire.')) {
+      event.target.checked = true;
+      return;
+    }
+    annConfigure({ paperMode: event.target.checked });
+  });
+  if (autoToggle) autoToggle.addEventListener('change', function(event) {
+    if (event.target.checked && !confirm('Enable auto-execute for announcement detections above threshold?')) {
+      event.target.checked = false;
+      return;
+    }
+    annConfigure({ autoExecute: event.target.checked });
+  });
+}
+
+function annConfigure(patch) {
+  api('/api/announcement/configure', 'POST', patch).then(function() {
+    toast('Announcement Sniper updated', 'success');
+    loadAnnouncements();
+  }).catch(function(error) {
+    toast(error.message, 'error');
+    loadAnnouncements();
+  });
+}
+
+function loadAnnouncements() {
+  initAnnouncementsPanel();
+  return Promise.all([
+    api('/api/announcement/status'),
+    api('/api/announcement/active?limit=25'),
+    api('/api/announcement/history?limit=60')
+  ]).then(function(results) {
+    var status = results[0] || {};
+    var active = (results[1] && results[1].items) || [];
+    var history = (results[2] && results[2].items) || [];
+    renderAnnouncementStatus(status);
+    renderAnnouncementList('#annActiveList', active, true);
+    renderAnnouncementList('#annHistoryList', history, false);
+    var historyBadge = $('#annHistoryBadge');
+    if (historyBadge) historyBadge.textContent = history.length;
+  }).catch(function(error) {
+    var statusText = $('#annStatusText');
+    if (statusText) statusText.textContent = 'Announcement API offline: ' + error.message;
+  });
+}
+
+function renderAnnouncementStatus(status) {
+  var enabled = !!status.enabled;
+  var paperMode = !!status.paperMode;
+  var autoExecute = !!status.autoExecute;
+  var dot = $('#annStatusDot');
+  if (dot) dot.className = 'ops-dot' + (enabled ? '' : ' off');
+  var text = $('#annStatusText');
+  if (text) text.textContent = (paperMode ? 'Paper mode' : 'Live mode') + ' - ' + (autoExecute ? 'auto-execute on' : 'manual confirm') + ' - ' + (status.patternCount || 0) + ' patterns';
+  var modeBadge = $('#annModeBadge');
+  if (modeBadge) { modeBadge.className = 'badge ' + (paperMode ? 'badge-yellow' : 'badge-red'); modeBadge.textContent = paperMode ? 'PAPER' : 'LIVE'; }
+  var scoreBadge = $('#annScoreBadge');
+  if (scoreBadge) scoreBadge.textContent = 'min score ' + (status.minSignalScore || '-');
+  var liveWarn = $('#annLiveWarn');
+  if (liveWarn) liveWarn.classList.toggle('show', !paperMode && autoExecute);
+  var enabledToggle = $('#annEnabledToggle');
+  var paperToggle = $('#annPaperToggle');
+  var autoToggle = $('#annAutoToggle');
+  if (enabledToggle) enabledToggle.checked = enabled;
+  if (paperToggle) paperToggle.checked = paperMode;
+  if (autoToggle) autoToggle.checked = autoExecute;
+  var trades = $('#annStatTrades');
+  if (trades) trades.textContent = (status.tradesToday || 0) + '/' + (status.maxTradesPerDay || 0);
+  var active = $('#annStatActive');
+  if (active) active.textContent = status.activeCount || 0;
+  var history = $('#annStatHistory');
+  if (history) history.textContent = status.historyCount || 0;
+  var cooldown = $('#annStatCooldown');
+  if (cooldown) cooldown.textContent = status.globalCooldownMsRemaining > 0 ? Math.ceil(status.globalCooldownMsRemaining / 1000) + 's' : '-';
+  var size = $('#annStatSize');
+  if (size) size.textContent = 'position ' + (status.defaultPositionSol || 0) + ' SOL';
+}
+
+function renderAnnouncementList(selector, items, activeList) {
+  var container = $(selector);
+  if (!container) return;
+  if (!items || !items.length) {
+    container.innerHTML = '<div class="ops-empty">' + (activeList ? 'No active detections' : 'Empty') + '</div>';
+    return;
+  }
+  container.innerHTML = items.map(function(item) { return renderAnnouncementItem(item, activeList); }).join('');
+}
+
+function renderAnnouncementItem(item, activeList) {
+  var direction = item.direction === 'short' ? 'short' : 'long';
+  var badgeClass = direction === 'long' ? 'badge-green' : 'badge-red';
+  var score = Number(item.score || 0);
+  var keywords = (item.matchedKeywords || []).slice(0, 4).map(function(keyword) {
+    return '<span class="ops-keyword">' + esc(keyword) + '</span>';
+  }).join('');
+  var mint = item.mint ? '<span class="mono">' + esc(String(item.mint).slice(0, 8)) + '..</span>' : '';
+  var statusBadge = '<span class="badge badge-blue">' + esc(item.status || 'detected') + '</span>';
+  var approve = activeList && item.mint ? '<button class="btn btn-primary btn-xs" onclick="annApprove(\'' + escJsStr(item.id) + '\')">Approve</button>' : '';
+  var skip = activeList ? '<button class="btn btn-danger btn-xs" onclick="annSkip(\'' + escJsStr(item.id) + '\')">Skip</button>' : '';
+  return '<div class="ops-detection-row ' + direction + '">' +
+    '<div class="ops-row-mark"><span class="badge ' + badgeClass + '">' + direction.toUpperCase() + '</span><span class="ops-score ' + (score >= 90 ? 'high' : '') + '">' + score + '</span></div>' +
+    '<div><div class="ops-detection-text">' + esc(item.text || '').slice(0, 220) + '</div><div class="ops-detection-meta"><span>' + esc(item.patternLabel || 'pattern') + '</span>' + mint + keywords + statusBadge + '<span>' + fmtAge(item.ts) + '</span></div></div>' +
+    '<div class="ops-row-actions">' + approve + skip + '</div>' +
+  '</div>';
+}
+
+function annApprove(id) {
+  if (!confirm('Approve this announcement signal? It will respect current paper/live mode.')) return;
+  api('/api/announcement/approve/' + encodeURIComponent(id), 'POST', {}).then(function(result) {
+    if (result && result.ok === false) throw new Error(result.error || 'Approve failed');
+    toast('Announcement approved', 'success');
+    loadAnnouncements();
+  }).catch(function(error) { toast(error.message, 'error'); });
+}
+
+function annSkip(id) {
+  api('/api/announcement/skip/' + encodeURIComponent(id), 'POST').then(function() {
+    toast('Announcement skipped', 'success');
+    loadAnnouncements();
+  }).catch(function(error) { toast(error.message, 'error'); });
+}
+
+function initHyperliquidPanel() {
+  if (hyperliquidPanelBound) return;
+  hyperliquidPanelBound = true;
+  var annToggle = $('#hlAnnToggle');
+  if (annToggle) annToggle.addEventListener('change', function(event) {
+    if (event.target.checked && !confirm('Enable paper auto-shorts from bearish announcements?')) {
+      event.target.checked = false;
+      return;
+    }
+    hlApplyConfig();
+  });
+}
+
+function loadHyperliquid() {
+  initHyperliquidPanel();
+  return Promise.all([
+    api('/api/hyperliquid/status'),
+    api('/api/hyperliquid/positions?includeClosed=' + (hlShowClosed ? 'true' : 'false')),
+    api('/api/hyperliquid/funding')
+  ]).then(function(results) {
+    var status = results[0] || {};
+    var positions = (results[1] && results[1].items) || [];
+    var funding = (results[2] && results[2].items) || [];
+    hlFundingItems = funding;
+    renderHyperliquidStatus(status);
+    renderHyperliquidPositions(positions);
+    renderHyperliquidFunding(funding);
+  }).catch(function(error) {
+    var statusText = $('#hlStatusText');
+    if (statusText) statusText.textContent = 'Hyperliquid API offline: ' + error.message;
+  });
+}
+
+function renderHyperliquidStatus(status) {
+  var text = $('#hlStatusText');
+  if (text) text.textContent = (status.note || 'Paper-only Hyperliquid adapter') + ' - default $' + (status.defaultSizeUsd || 0) + ' x' + (status.defaultLeverage || 0);
+  var modeBadge = $('#hlModeBadge');
+  if (modeBadge) { modeBadge.className = 'badge badge-yellow'; modeBadge.textContent = status.paperMode ? 'PAPER' : 'LIVE'; }
+  var annBadge = $('#hlAnnBadge');
+  if (annBadge) { annBadge.className = 'badge ' + (status.enableShortFromAnnouncement ? 'badge-red' : 'badge-blue'); annBadge.textContent = status.enableShortFromAnnouncement ? 'announcement shorts on' : 'announcement shorts off'; }
+  var annToggle = $('#hlAnnToggle');
+  if (annToggle) annToggle.checked = !!status.enableShortFromAnnouncement;
+  var sizeInput = $('#hlDefaultSize');
+  var levInput = $('#hlDefaultLev');
+  var maxInput = $('#hlMaxOpen');
+  if (sizeInput && document.activeElement !== sizeInput) sizeInput.value = status.defaultSizeUsd || '';
+  if (levInput && document.activeElement !== levInput) levInput.value = status.defaultLeverage || '';
+  if (maxInput && document.activeElement !== maxInput) maxInput.value = status.maxOpenPositions || '';
+  var statMode = $('#hlStatMode');
+  if (statMode) statMode.textContent = status.paperMode ? 'Paper' : 'Live';
+  var statOpen = $('#hlStatOpen');
+  if (statOpen) statOpen.textContent = (status.openCount || 0) + '/' + (status.maxOpenPositions || 0);
+  var statSize = $('#hlStatSize');
+  if (statSize) statSize.textContent = '$' + (status.defaultSizeUsd || 0);
+  var statLev = $('#hlStatLev');
+  if (statLev) statLev.textContent = (status.defaultLeverage || 0) + 'x';
+}
+
+function hlApplyConfig() {
+  var patch = {};
+  var annToggle = $('#hlAnnToggle');
+  if (annToggle) patch.enableShortFromAnnouncement = !!annToggle.checked;
+  var size = Number($('#hlDefaultSize') && $('#hlDefaultSize').value);
+  var leverage = Number($('#hlDefaultLev') && $('#hlDefaultLev').value);
+  var maxOpen = Number($('#hlMaxOpen') && $('#hlMaxOpen').value);
+  if (Number.isFinite(size) && size > 0) patch.defaultSizeUsd = size;
+  if (Number.isFinite(leverage) && leverage > 0) patch.defaultLeverage = leverage;
+  if (Number.isFinite(maxOpen) && maxOpen > 0) patch.maxOpenPositions = maxOpen;
+  api('/api/hyperliquid/configure', 'POST', patch).then(function() {
+    toast('Hyperliquid config updated', 'success');
+    loadHyperliquid();
+  }).catch(function(error) { toast(error.message, 'error'); loadHyperliquid(); });
+}
+
+function hlOpenPosition() {
+  var coin = (($('#hlOpenCoin') && $('#hlOpenCoin').value) || '').trim().toUpperCase();
+  if (!coin) { toast('Coin is required', 'error'); return; }
+  var body = {
+    coin: coin,
+    side: ($('#hlOpenSide') && $('#hlOpenSide').value) || 'long'
+  };
+  var size = Number($('#hlOpenSize') && $('#hlOpenSize').value);
+  var leverage = Number($('#hlOpenLev') && $('#hlOpenLev').value);
+  var reason = (($('#hlOpenReason') && $('#hlOpenReason').value) || '').trim();
+  if (Number.isFinite(size) && size > 0) body.szUsd = size;
+  if (Number.isFinite(leverage) && leverage > 0) body.leverage = leverage;
+  if (reason) body.reason = reason;
+  api('/api/hyperliquid/open', 'POST', body).then(function(result) {
+    if (result && result.ok === false) throw new Error(result.error || 'Open failed');
+    toast('Paper position opened', 'success');
+    var coinInput = $('#hlOpenCoin');
+    var reasonInput = $('#hlOpenReason');
+    if (coinInput) coinInput.value = '';
+    if (reasonInput) reasonInput.value = '';
+    loadHyperliquid();
+  }).catch(function(error) { toast(error.message, 'error'); });
+}
+
+function hlClosePosition(id) {
+  if (!confirm('Close this paper position?')) return;
+  api('/api/hyperliquid/close/' + encodeURIComponent(id), 'POST').then(function(result) {
+    if (result && result.ok === false) throw new Error(result.error || 'Close failed');
+    toast('Paper position closed', 'success');
+    loadHyperliquid();
+  }).catch(function(error) { toast(error.message, 'error'); });
+}
+
+function hlToggleClosed() {
+  hlShowClosed = !hlShowClosed;
+  var button = $('#hlClosedToggle');
+  if (button) button.textContent = hlShowClosed ? 'Hide Closed' : 'Show Closed';
+  loadHyperliquid();
+}
+
+function renderHyperliquidPositions(positions) {
+  var body = $('#hlPositionsBody');
+  if (!body) return;
+  if (!positions || !positions.length) {
+    body.innerHTML = '<tr><td colspan="7" class="ops-muted" style="text-align:center;padding:24px">No positions</td></tr>';
+    return;
+  }
+  body.innerHTML = positions.map(function(position) {
+    var pnl = position.pnlUsd;
+    var pnlClass = pnl > 0 ? 'ops-pnl-pos' : pnl < 0 ? 'ops-pnl-neg' : 'ops-muted';
+    var pnlText = pnl == null ? '-' : (pnl >= 0 ? '+' : '') + Number(pnl).toFixed(2);
+    var action = position.status === 'open' ? '<button class="btn btn-danger btn-xs" onclick="hlClosePosition(\'' + escJsStr(position.id) + '\')">Close</button>' : '<span class="ops-muted">closed</span>';
+    return '<tr>' +
+      '<td><strong>' + esc(position.coin || '-') + '</strong><div class="ops-muted" style="font-size:.68rem">' + fmtAge(position.openedAt) + '</div></td>' +
+      '<td><span class="badge ' + (position.side === 'short' ? 'badge-red' : 'badge-green') + '">' + esc(position.side || '-') + '</span></td>' +
+      '<td>$' + (position.szUsd || 0) + ' x' + (position.leverage || 0) + '</td>' +
+      '<td>' + hlFmtPrice(position.entryPx) + '</td>' +
+      '<td>' + (position.closePx ? hlFmtPrice(position.closePx) : '-') + '</td>' +
+      '<td class="' + pnlClass + '">' + pnlText + '</td>' +
+      '<td>' + action + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderHyperliquidFunding(items) {
+  var body = $('#hlFundingBody');
+  if (!body) return;
+  if (!items || !items.length) {
+    body.innerHTML = '<tr><td colspan="4" class="ops-muted" style="text-align:center;padding:24px">No funding data</td></tr>';
+    return;
+  }
+  var top = items.slice().sort(function(left, right) { return Math.abs(right.funding || 0) - Math.abs(left.funding || 0); }).slice(0, 20);
+  body.innerHTML = top.map(function(item) {
+    var rate = Number(item.funding || 0) * 100;
+    var rateClass = rate > 0 ? 'ops-pnl-pos' : rate < 0 ? 'ops-pnl-neg' : 'ops-muted';
+    return '<tr>' +
+      '<td><strong>' + esc(item.coin || '-') + '</strong></td>' +
+      '<td>' + hlFmtPrice(item.markPx) + '</td>' +
+      '<td class="' + rateClass + '">' + (rate >= 0 ? '+' : '') + rate.toFixed(4) + '%</td>' +
+      '<td>' + Math.round(item.openInterest || 0).toLocaleString() + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function hlFmtPrice(value) {
+  var number = Number(value || 0);
+  if (!number) return '-';
+  if (number >= 1000) return number.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (number >= 1) return number.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return number.toPrecision(4);
+}
+
+function hlPrefillFunding() {
+  if (!hlFundingItems.length) { toast('Funding data not loaded yet', 'error'); return; }
+  var top = hlFundingItems.slice().sort(function(left, right) { return Math.abs(right.funding || 0) - Math.abs(left.funding || 0); })[0];
+  if (!top) return;
+  var coinInput = $('#hlOpenCoin');
+  var sideInput = $('#hlOpenSide');
+  var reasonInput = $('#hlOpenReason');
+  if (coinInput) coinInput.value = top.coin || '';
+  if (sideInput) sideInput.value = top.funding > 0 ? 'short' : 'long';
+  if (reasonInput) reasonInput.value = 'funding ' + (Number(top.funding || 0) * 100).toFixed(4) + '%';
 }
 
 function toggleSidebar() {
@@ -10344,6 +10861,7 @@ function applySettingsScope() {
     if (!input) return;
     var row = input.closest('.api-key-row');
     if (!row) return;
+    if (row.getAttribute('data-always-visible') === 'true') { row.style.display = ''; return; }
     var show = !active ? true : (scope.api.length ? scope.api.indexOf(p) >= 0 : false);
     row.style.display = show ? '' : 'none';
   });
@@ -10976,7 +11494,7 @@ function saveModelConfig() {
   });
 }
 
-var API_KEY_PROVIDERS = ['openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama'];
+var API_KEY_PROVIDERS = ['openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama','hyperliquid_api_url','hyperliquid_account_address','hyperliquid_api_wallet_address','hyperliquid_private_key'];
 
 function loadApiKeys() {
   api('/api/keys/config').then(function(data) {
@@ -12350,6 +12868,11 @@ function loadNews() {
 setInterval(function() {
   if (currentView === 'news') loadNews();
 }, 60000);
+
+setInterval(function() {
+  if (currentView === 'announcements') loadAnnouncements();
+  if (currentView === 'hyperliquid') loadHyperliquid();
+}, 15000);
 
 setInterval(function() {
   var oneHourAgo = Date.now() - 3600000;

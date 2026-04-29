@@ -151,6 +151,8 @@ export interface TradeIntent {
   priorityFeeSol: number;
   reason: string;
   timestamp: number;
+  tags?: string[];
+  origin?: 'sniper' | 'announcement' | 'manual' | 'copy-trade' | 'alpha' | 'other';
 }
 
 export interface TradeResult {
@@ -313,6 +315,23 @@ export interface EventMap {
   'news:headline': { item: NewsItem; timestamp: number };
   'news:batch': { items: NewsItem[]; source: string; count: number; timestamp: number };
   'news:sentiment_update': NewsSentimentSummary;
+
+  'gmgn:tweet': { mint: string; ts: number; analysis?: string; relatedAnalysis?: string };
+  'announcement:detected': {
+    id: string;
+    ts: number;
+    source: 'gmgn-twitter' | 'news' | 'manual' | 'social-monitor';
+    patternId: string;
+    patternLabel: string;
+    direction: 'long' | 'short';
+    score: number;
+    matchedKeywords: string[];
+    text: string;
+    mint?: string;
+    symbol?: string;
+    url?: string;
+    status: 'detected' | 'skipped' | 'paper-traded' | 'live-traded' | 'expired';
+  };
 }
 
 export type EventName = keyof EventMap;

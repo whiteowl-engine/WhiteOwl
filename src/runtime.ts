@@ -1372,6 +1372,10 @@ restoreCustomAgents(): void {
     ollama: 'OLLAMA_BASE_URL',
     houdini_key: 'HOUDINI_API_KEY',
     houdini_secret: 'HOUDINI_API_SECRET',
+    hyperliquid_api_url: 'HYPERLIQUID_API_URL',
+    hyperliquid_account_address: 'HYPERLIQUID_ACCOUNT_ADDRESS',
+    hyperliquid_api_wallet_address: 'HYPERLIQUID_API_WALLET_ADDRESS',
+    hyperliquid_private_key: 'HYPERLIQUID_PRIVATE_KEY',
   };
 
   getApiKeys(): Record<string, string> {
@@ -1380,7 +1384,9 @@ restoreCustomAgents(): void {
       const val = process.env[envKey];
       if (val) {
 
-        result[provider] = provider === 'ollama' ? val : '***configured***';
+        result[provider] = provider === 'ollama' || provider === 'hyperliquid_api_url' || provider === 'hyperliquid_account_address' || provider === 'hyperliquid_api_wallet_address'
+          ? val
+          : '***configured***';
       }
     }
     return result;

@@ -16,8 +16,8 @@
   <img src="https://img.shields.io/badge/node-%3E%3D18-111827?style=for-the-badge&logo=node.js&logoColor=7ee787&labelColor=020617" alt="Node">
   <img src="https://img.shields.io/badge/typescript-5.x-111827?style=for-the-badge&logo=typescript&logoColor=7dd3fc&labelColor=020617" alt="TypeScript">
   <img src="https://img.shields.io/badge/license-MIT-111827?style=for-the-badge&logo=opensourceinitiative&logoColor=a3e635&labelColor=020617" alt="License">
-  <img src="https://img.shields.io/badge/skills-29-111827?style=for-the-badge&logo=buffer&logoColor=f59e0b&labelColor=020617" alt="Skills">
-  <img src="https://img.shields.io/badge/tools-208-111827?style=for-the-badge&logo=raycast&logoColor=f97316&labelColor=020617" alt="Tools">
+  <img src="https://img.shields.io/badge/skills-31-111827?style=for-the-badge&logo=buffer&logoColor=f59e0b&labelColor=020617" alt="Skills">
+  <img src="https://img.shields.io/badge/tools-224-111827?style=for-the-badge&logo=raycast&logoColor=f97316&labelColor=020617" alt="Tools">
   <img src="https://img.shields.io/badge/solana-mainnet-111827?style=for-the-badge&logo=solana&logoColor=c084fc&labelColor=020617" alt="Solana">
 </p>
 
@@ -39,7 +39,13 @@
 | **AI Chat** | Multi-agent operator console with model switching, auto-approve controls, streamed reasoning, and persistent sessions |
 | **Market Intel** | Live events, news aggregation, X tracking, token discovery, holder analysis, and pump.fun monitoring |
 | **Trading Workflow** | Paper/live execution profiles, risk limits, copy trading, curve analysis, exit automation, and wallet tools |
+| **Announcement Sniper** | Detects high-signal buybacks, burns, listings, partnerships, and exploit news, then routes scored signals into manual or automated execution |
+| **Perp Desk** | Native Hyperliquid paper-perp surface with funding, marks, paper positions, and encrypted API settings |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
+
+## Panel 1.0.4 Update
+
+WhiteOwl 1.0.4 adds native dashboard surfaces for **Announce Sniper** and **HL Perps**. Announce Sniper watches GMGN Twitter/news events for high-impact token announcements, sanitizes noisy social/HTML text, scores long/short patterns, supports manual approval, and can feed announcement-aware risk and sniper sizing. HL Perps adds a paper-only Hyperliquid adapter for marks, funding, paper positions, bearish-announcement shorts, and encrypted Hyperliquid API settings in `Settings -> API Keys`.
 
 ## Companion Extension
 
@@ -73,7 +79,7 @@ The current public build exposes the main dashboard, agent chat, portfolio, wall
 
 - **Web Dashboard** — Full-featured trading panel with real-time data, charts, and controls
 - **Multi-Agent System** — Configurable agents (Strategy Commander, Coder, Shit Trader) with independent skills and autonomy levels
-- **29 Plugin Skills, 208 Tools** — Modular architecture covering trading, analysis, market intel, portfolio, and automation
+- **31 Plugin Skills, 224 Tools** — Modular architecture covering trading, analysis, market intel, portfolio, perps, announcements, and automation
 - **Multi-LLM Support** — OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Groq, DeepSeek, Ollama (local), OpenRouter, Mistral, Cerebras, Together, Fireworks, GitHub Copilot (free via OAuth), Azure OpenAI, AWS Bedrock, Vertex AI, and more
 - **Autonomous Trading** — Shit Trader surface with paper trading, execution profiles, risk engine, and market connections to Axiom and Pump.fun
 - **Live Events** — Real-time event streaming via WebSocket with full AI activity log
@@ -82,6 +88,8 @@ The current public build exposes the main dashboard, agent chat, portfolio, wall
 - **Copy Trading** — Mirror trades from tracked smart money wallets
 - **Token Analysis** — Holder distribution, dev wallet checks, rug detection, security audit, curve analysis
 - **News Aggregation** — Multi-source news feed with category filters (Crypto, Politics, Tech, DeFi, Solana, etc.)
+- **Announce Sniper** - High-signal announcement detector for buybacks, burns, listings, partnerships, exploits, and manual/auto execution flows
+- **HL Perps** - Native Hyperliquid paper-perp desk with funding, mark prices, paper positions, and encrypted API settings
 - **X Tracker** — Real-time Twitter/X monitoring with KOL tracking
 - **GMGN Integration** — Token data, security analysis, holder intelligence
 - **Axiom Integration** — Direct REST API integration with axiom.trade
@@ -146,14 +154,16 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | **Agent** | Agent cards with role, autonomy level, model, stats, skill assignments, chat |
 | **Background Jobs** | Scheduled tasks with run counts, status, and results |
 | **Shit Trader** | Autonomous trading surface — paper/live toggle, execution profile, risk engine, Axiom + Pump.fun connections |
-| **Skills** | 29 skills and 208 tools organized by category (Trading, Analysis, Market Intel, Portfolio, Other) |
+| **Announce Sniper** | Native announcement detection desk with active/history queues, score thresholds, paper/live controls, and manual approval |
+| **HL Perps** | Hyperliquid paper-perp surface with funding rates, mark prices, position controls, and announcement-short bridge |
+| **Skills** | 31 skills and 224 tools organized by category (Trading, Analysis, Market Intel, Portfolio, Perps, Other) |
 | **Projects** | Local AI project workspace with file management |
 | **Terminal** | Built-in terminal with AI Agent and manual tabs |
 | **Settings** | RPC configuration, OAuth / AI model selection, browser CDP connection, system health |
 
 ## Skill System
 
-29 skills organized by category:
+31 skills organized by category:
 
 **Trading**
 | Skill | Tools | Description |
@@ -162,6 +172,7 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | advanced-trader | 15 | DCA, trailing stop-loss, grid trading, graduation sniping |
 | exit-optimizer | 7 | AI exit strategy — profit-taking, trailing stops, volume decay |
 | copy-trade | 4 | Automated copy trading from tracked wallets |
+| hyperliquid-perp | 7 | Hyperliquid paper-perp adapter with marks, funding, positions, and bearish-announcement short bridge |
 
 **Analysis**
 | Skill | Tools | Description |
@@ -178,6 +189,7 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | pump-monitor | 35 | Full pump.fun integration — monitor launches, on-chain data |
 | social-monitor | 14 | Social media with real KOL tracking, LLM-powered NLP |
 | alpha-scanner | 12 | Telegram, Twitter, and secondary sites for new token alerts |
+| announcement-sniper | 9 | Announcement detector for buybacks, burns, listings, partnerships, exploits, and manual approval workflows |
 
 **Portfolio**
 | Skill | Tools | Description |
@@ -204,9 +216,9 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | news-search | 3 | Search and browse aggregated crypto news |
 | screenshot | 1 | Take screenshots of web pages |
 
-Total: **29 skills**, **208 tools** available to AI agents.
+Total: **31 skills**, **224 tools** available to AI agents.
 
-Representative runtime skills include `pump-monitor`, `token-analyzer`, `shit-trader`, `portfolio`, `wallet-tracker`, `gmgn`, `browser-eye`, `projects`, `terminal`, `background-jobs`, `ai-memory`, and `news-search`.
+Representative runtime skills include `pump-monitor`, `token-analyzer`, `shit-trader`, `announcement-sniper`, `hyperliquid-perp`, `portfolio`, `wallet-tracker`, `gmgn`, `browser-eye`, `projects`, `terminal`, `background-jobs`, `ai-memory`, and `news-search`.
 
 ## Risk Management
 
@@ -244,7 +256,7 @@ WhiteOwl/
 │   ├── lib/            # Pump SDK, cabalspy
 │   ├── llm/            # Multi-provider LLM layer (OpenAI, Anthropic, Gemini, ...)
 │   ├── memory/         # SQLite store, token/trade/news persistence
-│   ├── skills/         # 29 modular skill plugins (208 tools)
+│   ├── skills/         # 31 modular skill plugins (224 tools)
 │   └── wallet/         # Solana wallet, multisig, multi-wallet
 ├── public/             # Dashboard frontend (HTML/JS/CSS)
 ├── data/               # Runtime data (gitignored)
