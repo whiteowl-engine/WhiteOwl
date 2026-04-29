@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@whiteowl-engine/whiteowl",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "AI-powered trading panel for Solana memecoins",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -37,6 +37,7 @@
   "author": "diegoochavezz",
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@nktkas/hyperliquid": "^0.32.2",
     "@pump-fun/pump-sdk": "^1.31.0",
     "@solana/web3.js": "^1.95.0",
     "@sqds/multisig": "^2.1.4",
@@ -56,6 +57,7 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "qrcode": "^1.5.4",
     "sql.js": "^1.14.1",
+    "viem": "^2.48.4",
     "websocket": "^1.0.35",
     "ws": "^8.18.0",
     "yaml": "^2.6.0",

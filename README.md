@@ -40,12 +40,12 @@
 | **Market Intel** | Live events, news aggregation, X tracking, token discovery, holder analysis, and pump.fun monitoring |
 | **Trading Workflow** | Paper/live execution profiles, risk limits, copy trading, curve analysis, exit automation, and wallet tools |
 | **Announcement Sniper** | Detects high-signal buybacks, burns, listings, partnerships, and exploit news, then routes scored signals into manual or automated execution |
-| **Perp Desk** | Native Hyperliquid paper-perp surface with funding, marks, paper positions, and encrypted API settings |
+| **Perp Desk** | Native Hyperliquid perp surface with funding, marks, live or paper positions, and encrypted API settings |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
 
-## Panel 1.0.4 Update
+## Panel 1.0.5 Update
 
-WhiteOwl 1.0.4 adds native dashboard surfaces for **Announce Sniper** and **HL Perps**. Announce Sniper watches GMGN Twitter/news events for high-impact token announcements, sanitizes noisy social/HTML text, scores long/short patterns, supports manual approval, and can feed announcement-aware risk and sniper sizing. HL Perps adds a paper-only Hyperliquid adapter for marks, funding, paper positions, bearish-announcement shorts, and encrypted Hyperliquid API settings in `Settings -> API Keys`.
+WhiteOwl 1.0.5 adds native dashboard surfaces for **Announce Sniper** and **HL Perps**. Announce Sniper watches GMGN Twitter/news events for high-impact token announcements, sanitizes noisy social/HTML text, scores long/short patterns, supports manual approval, and can feed announcement-aware risk and sniper sizing. HL Perps adds a Hyperliquid adapter with live and paper execution, signed live order routing, marks, funding, announcement-driven shorts, and encrypted Hyperliquid API settings in `Settings -> API Keys`.
 
 ## Companion Extension
 
@@ -89,7 +89,7 @@ The current public build exposes the main dashboard, agent chat, portfolio, wall
 - **Token Analysis** — Holder distribution, dev wallet checks, rug detection, security audit, curve analysis
 - **News Aggregation** — Multi-source news feed with category filters (Crypto, Politics, Tech, DeFi, Solana, etc.)
 - **Announce Sniper** - High-signal announcement detector for buybacks, burns, listings, partnerships, exploits, and manual/auto execution flows
-- **HL Perps** - Native Hyperliquid paper-perp desk with funding, mark prices, paper positions, and encrypted API settings
+- **HL Perps** - Native Hyperliquid perp desk with funding, mark prices, live or paper positions, and encrypted API settings
 - **X Tracker** — Real-time Twitter/X monitoring with KOL tracking
 - **GMGN Integration** — Token data, security analysis, holder intelligence
 - **Axiom Integration** — Direct REST API integration with axiom.trade
@@ -155,7 +155,7 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | **Background Jobs** | Scheduled tasks with run counts, status, and results |
 | **Shit Trader** | Autonomous trading surface — paper/live toggle, execution profile, risk engine, Axiom + Pump.fun connections |
 | **Announce Sniper** | Native announcement detection desk with active/history queues, score thresholds, paper/live controls, and manual approval |
-| **HL Perps** | Hyperliquid paper-perp surface with funding rates, mark prices, position controls, and announcement-short bridge |
+| **HL Perps** | Hyperliquid perp surface with funding rates, mark prices, live or paper position controls, and announcement-short bridge |
 | **Skills** | 31 skills and 224 tools organized by category (Trading, Analysis, Market Intel, Portfolio, Perps, Other) |
 | **Projects** | Local AI project workspace with file management |
 | **Terminal** | Built-in terminal with AI Agent and manual tabs |
@@ -172,7 +172,7 @@ https://github.com/whiteowl-engine/WhiteOwl-Extension
 | advanced-trader | 15 | DCA, trailing stop-loss, grid trading, graduation sniping |
 | exit-optimizer | 7 | AI exit strategy — profit-taking, trailing stops, volume decay |
 | copy-trade | 4 | Automated copy trading from tracked wallets |
-| hyperliquid-perp | 7 | Hyperliquid paper-perp adapter with marks, funding, positions, and bearish-announcement short bridge |
+| hyperliquid-perp | 7 | Hyperliquid perp adapter with live and paper execution, marks, funding, positions, and bearish-announcement short bridge |
 
 **Analysis**
 | Skill | Tools | Description |

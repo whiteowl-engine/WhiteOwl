@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { ExchangeClient, HttpTransport, InfoClient } from '@nktkas/hyperliquid';
+import { formatPrice, formatSize, SymbolConverter } from '@nktkas/hyperliquid/utils';
+import { privateKeyToAccount } from 'viem/accounts';
 import {
   Skill,
   SkillManifest,
@@ -19,6 +22,7 @@ export interface HLPaperPosition {
   coin: string;
   side: 'long' | 'short';
   szUsd: number;
+  szBase?: number;
   leverage: number;
   entryPx: number;
   openedAt: number;
@@ -28,6 +32,7 @@ export interface HLPaperPosition {
   reason?: string;
   status: 'open' | 'closed';
   source?: 'manual' | 'announcement';
+  mode?: 'paper' | 'live';
 }
 
 interface HLState {
@@ -51,13 +56,13 @@ const DEFAULT_STATE: HLState = {
 export class HyperliquidPerpSkill implements Skill {
   manifest: SkillManifest = {
     name: 'hyperliquid-perp',
-    version: '0.1.0',
+    version: '0.2.0',
     description:
-      'Hyperliquid perp adapter (Phase 4 paper-only). Read-only market data via public info endpoint, paper-mode short/long positions, and an opt-in bridge from bearish announcements to perp shorts.',
+      'Hyperliquid perp adapter with live and paper execution, public market data, and an opt-in bridge from bearish announcements to perp shorts.',
     tools: [
       {
         name: 'hl_status',
-        description: 'Current Hyperliquid skill status: paper mode, open paper positions, config.',
+        description: 'Current Hyperliquid skill status: execution mode, live readiness, open positions, and config.',
         parameters: { type: 'object', properties: {} },
         riskLevel: 'read',
       },
@@ -96,7 +101,7 @@ export class HyperliquidPerpSkill implements Skill {
       },
       {
         name: 'hl_open',
-        description: 'Open a paper-mode perp position. Live mode is not supported in this build.',
+        description: 'Open a Hyperliquid perp position in the active mode. Paper stores local positions; live sends a signed IOC order.',
         parameters: {
           type: 'object',
           properties: {
@@ -112,7 +117,7 @@ export class HyperliquidPerpSkill implements Skill {
       },
       {
         name: 'hl_close',
-        description: 'Close a paper-mode perp position by id.',
+        description: 'Close a Hyperliquid perp position by id. In live mode this sends a reduce-only IOC order.',
         parameters: {
           type: 'object',
           properties: { id: { type: 'string' } },
@@ -122,7 +127,7 @@ export class HyperliquidPerpSkill implements Skill {
       },
       {
         name: 'hl_positions',
-        description: 'List paper-mode perp positions (open + recent closed).',
+        description: 'List Hyperliquid positions for the active mode.',
         parameters: {
           type: 'object',
           properties: { includeClosed: { type: 'boolean' } },
@@ -146,7 +151,7 @@ export class HyperliquidPerpSkill implements Skill {
     this.bindEvents();
 
     this.logger.info(
-      `[Hyperliquid] Initialized — paper=${this.state.paperMode} sizeUsd=${this.state.defaultSizeUsd} ` +
+      `[Hyperliquid] Initialized - paper=${this.state.paperMode} sizeUsd=${this.state.defaultSizeUsd} ` +
         `lev=${this.state.defaultLeverage}x maxPos=${this.state.maxOpenPositions} ` +
         `annShorts=${this.state.enableShortFromAnnouncement} positions=${this.state.positions.filter(p => p.status === 'open').length}`
     );
@@ -155,9 +160,9 @@ export class HyperliquidPerpSkill implements Skill {
   async execute(tool: string, params: Record<string, any>): Promise<any> {
     switch (tool) {
       case 'hl_status':
-        return this.getStatus();
+        return await this.getStatus();
       case 'hl_configure':
-        return this.configure(params);
+        return await this.configure(params);
       case 'hl_funding':
         return await this.getFunding(params.coin);
       case 'hl_mark_price':
@@ -167,7 +172,7 @@ export class HyperliquidPerpSkill implements Skill {
       case 'hl_close':
         return await this.closePosition(params.id);
       case 'hl_positions':
-        return this.listPositions(!!params.includeClosed);
+        return await this.listPositions(!!params.includeClosed);
       default:
         throw new Error(`Unknown tool: ${tool}`);
     }
@@ -185,12 +190,12 @@ export class HyperliquidPerpSkill implements Skill {
         if ((det.score ?? 0) < 85) return;
         const coin = (det.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
         if (!coin) {
-          this.logger.debug('[Hyperliquid] Bearish announcement without symbol — skipping perp short');
+          this.logger.debug('[Hyperliquid] Bearish announcement without symbol - skipping perp short');
           return;
         }
         const known = await this.isKnownPerp(coin);
         if (!known) {
-          this.logger.debug(`[Hyperliquid] ${coin} not on Hyperliquid — skipping perp short`);
+          this.logger.debug(`[Hyperliquid] ${coin} not on Hyperliquid - skipping perp short`);
           return;
         }
         await this.openPosition({
@@ -207,26 +212,40 @@ export class HyperliquidPerpSkill implements Skill {
     });
   }
 
-  private getStatus() {
-    const open = this.state.positions.filter(p => p.status === 'open');
+  private async getStatus() {
+    const credentials = this.getLiveCredentials();
+    const liveReady = !!credentials.accountAddress && !!credentials.privateKey;
+    const open = this.state.paperMode
+      ? this.state.positions.filter(p => p.status === 'open')
+      : await this.getLivePositions(false).catch(() => []);
+    const note = this.state.paperMode
+      ? (liveReady
+          ? 'Paper mode active. Switch off paper mode to route orders to Hyperliquid live.'
+          : 'Paper mode active. Add Hyperliquid account and private key to enable live execution.')
+      : (liveReady
+          ? 'Live mode active. Orders use signed Hyperliquid IOC execution.'
+          : 'Live mode selected, but Hyperliquid account/private key are not fully configured.');
     return {
       paperMode: this.state.paperMode,
+      mode: this.state.paperMode ? 'paper' : 'live',
       defaultSizeUsd: this.state.defaultSizeUsd,
       defaultLeverage: this.state.defaultLeverage,
       maxOpenPositions: this.state.maxOpenPositions,
       enableShortFromAnnouncement: this.state.enableShortFromAnnouncement,
       apiUrl: this.getInfoUrl(),
-      accountConfigured: !!process.env.HYPERLIQUID_ACCOUNT_ADDRESS,
-      apiWalletConfigured: !!process.env.HYPERLIQUID_API_WALLET_ADDRESS,
-      privateKeyConfigured: !!process.env.HYPERLIQUID_PRIVATE_KEY,
+      accountConfigured: !!credentials.accountAddress,
+      apiWalletConfigured: !!credentials.apiWalletAddress,
+      privateKeyConfigured: !!credentials.privateKey,
       openCount: open.length,
-      totalCount: this.state.positions.length,
-      live: false,
-      note: 'Phase 4 paper-only - live signing not implemented.',
+      totalCount: this.state.paperMode ? this.state.positions.length : open.length,
+      live: !this.state.paperMode,
+      liveSupported: true,
+      liveReady,
+      note,
     };
   }
 
-  private configure(patch: Partial<HLState>) {
+  private async configure(patch: Partial<HLState>) {
     const allowed: (keyof HLState)[] = [
       'paperMode',
       'defaultSizeUsd',
@@ -234,15 +253,17 @@ export class HyperliquidPerpSkill implements Skill {
       'maxOpenPositions',
       'enableShortFromAnnouncement',
     ];
-    for (const k of allowed) {
-      if (patch[k] !== undefined) (this.state as any)[k] = patch[k];
-    }
-    if (this.state.paperMode === false) {
-      this.state.paperMode = true;
-      this.logger.warn('[Hyperliquid] Live mode requested but not supported in this build - staying paper.');
+    for (const key of allowed) {
+      if (patch[key] !== undefined) (this.state as any)[key] = patch[key];
     }
     this.persistState();
-    return { ok: true, status: this.getStatus() };
+    if (!this.state.paperMode) {
+      const credentials = this.getLiveCredentials();
+      if (!credentials.accountAddress || !credentials.privateKey) {
+        this.logger.warn('[Hyperliquid] Live mode selected without full credentials. Trading calls will fail until configured.');
+      }
+    }
+    return { ok: true, status: await this.getStatus() };
   }
 
   private async openPosition(params: {
@@ -253,6 +274,9 @@ export class HyperliquidPerpSkill implements Skill {
     reason?: string;
     source?: 'manual' | 'announcement';
   }): Promise<{ ok: boolean; position?: HLPaperPosition; error?: string }> {
+    if (!this.state.paperMode) {
+      return await this.openLivePosition(params);
+    }
     const coin = (params.coin || '').toUpperCase();
     const side = params.side;
     if (!coin || (side !== 'long' && side !== 'short')) {
@@ -279,6 +303,7 @@ export class HyperliquidPerpSkill implements Skill {
       reason: params.reason,
       status: 'open',
       source: params.source || 'manual',
+      mode: 'paper',
     };
     this.state.positions.push(pos);
     this.persistState();
@@ -290,6 +315,9 @@ export class HyperliquidPerpSkill implements Skill {
   }
 
   private async closePosition(id: string): Promise<{ ok: boolean; position?: HLPaperPosition; error?: string }> {
+    if (!this.state.paperMode) {
+      return await this.closeLivePosition(id);
+    }
     const pos = this.state.positions.find(p => p.id === id && p.status === 'open');
     if (!pos) return { ok: false, error: 'not found or already closed' };
     const px = await this.getMarkPriceNumber(pos.coin);
@@ -308,15 +336,66 @@ export class HyperliquidPerpSkill implements Skill {
     return { ok: true, position: pos };
   }
 
-  private listPositions(includeClosed: boolean) {
+  private async listPositions(includeClosed: boolean) {
+    if (!this.state.paperMode) {
+      return { items: await this.getLivePositions(includeClosed) };
+    }
     const items = includeClosed
       ? this.state.positions
       : this.state.positions.filter(p => p.status === 'open');
     return { items: [...items].reverse() };
   }
 
+  private getApiBaseUrl(): string {
+    const raw = (process.env.HYPERLIQUID_API_URL || HL_INFO_URL).trim();
+    const withoutInfo = raw.replace(/\/info\/?$/i, '');
+    return withoutInfo.replace(/\/$/, '') || 'https://api.hyperliquid.xyz';
+  }
+
   private getInfoUrl(): string {
-    return process.env.HYPERLIQUID_API_URL || HL_INFO_URL;
+    return `${this.getApiBaseUrl()}/info`;
+  }
+
+  private getLiveCredentials(): {
+    accountAddress: string;
+    apiWalletAddress: string;
+    privateKey: string;
+  } {
+    return {
+      accountAddress: (process.env.HYPERLIQUID_ACCOUNT_ADDRESS || '').trim(),
+      apiWalletAddress: (process.env.HYPERLIQUID_API_WALLET_ADDRESS || '').trim(),
+      privateKey: this.normalizePrivateKey(process.env.HYPERLIQUID_PRIVATE_KEY || ''),
+    };
+  }
+
+  private normalizePrivateKey(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+  }
+
+  private createTransport(): HttpTransport {
+    return new HttpTransport({ apiUrl: this.getApiBaseUrl() });
+  }
+
+  private async createLiveClients(): Promise<{
+    exchange: ExchangeClient;
+    converter: Awaited<ReturnType<typeof SymbolConverter.create>>;
+  }> {
+    const credentials = this.getLiveCredentials();
+    if (!credentials.accountAddress) {
+      throw new Error('Hyperliquid account address is required for live mode');
+    }
+    if (!credentials.privateKey) {
+      throw new Error('Hyperliquid private key is required for live mode');
+    }
+    const transport = this.createTransport();
+    const exchange = new ExchangeClient({
+      transport,
+      wallet: privateKeyToAccount(credentials.privateKey as `0x${string}`),
+    });
+    const converter = await SymbolConverter.create({ transport });
+    return { exchange, converter };
   }
 
   private async info<T = any>(body: any): Promise<T> {
@@ -332,7 +411,7 @@ export class HyperliquidPerpSkill implements Skill {
   private async isKnownPerp(coin: string): Promise<boolean> {
     try {
       const meta = await this.info<{ universe?: Array<{ name: string }> }>({ type: 'meta' });
-      return !!meta.universe?.some(u => u.name?.toUpperCase() === coin);
+      return !!meta.universe?.some(item => item.name?.toUpperCase() === coin);
     } catch {
       return false;
     }
@@ -343,16 +422,16 @@ export class HyperliquidPerpSkill implements Skill {
     const meta = data?.[0];
     const ctxs = data?.[1];
     if (!Array.isArray(meta?.universe) || !Array.isArray(ctxs)) return { items: [] };
-    const items = meta.universe.map((u: any, i: number) => ({
-      coin: u.name,
-      funding: parseFloat(ctxs[i]?.funding ?? '0'),
-      premium: parseFloat(ctxs[i]?.premium ?? '0'),
-      markPx: parseFloat(ctxs[i]?.markPx ?? '0'),
-      openInterest: parseFloat(ctxs[i]?.openInterest ?? '0'),
+    const items = meta.universe.map((item: any, index: number) => ({
+      coin: item.name,
+      funding: parseFloat(ctxs[index]?.funding ?? '0'),
+      premium: parseFloat(ctxs[index]?.premium ?? '0'),
+      markPx: parseFloat(ctxs[index]?.markPx ?? '0'),
+      openInterest: parseFloat(ctxs[index]?.openInterest ?? '0'),
     }));
     if (coinFilter) {
-      const c = coinFilter.toUpperCase();
-      return { items: items.filter((x: any) => x.coin?.toUpperCase() === c) };
+      const coin = coinFilter.toUpperCase();
+      return { items: items.filter((item: any) => item.coin?.toUpperCase() === coin) };
     }
     return { items };
   }
@@ -360,11 +439,11 @@ export class HyperliquidPerpSkill implements Skill {
   private async getMarkPrice(coinFilter?: string): Promise<any> {
     const all = await this.info<Record<string, string>>({ type: 'allMids' });
     if (coinFilter) {
-      const c = coinFilter.toUpperCase();
-      const k = Object.keys(all).find(x => x.toUpperCase() === c);
-      const px = k ? parseFloat(all[k]) : null;
-      if (px) this.markCache.set(c, { px, ts: Date.now() });
-      return { coin: c, markPx: px };
+      const coin = coinFilter.toUpperCase();
+      const key = Object.keys(all).find(item => item.toUpperCase() === coin);
+      const markPx = key ? parseFloat(all[key]) : null;
+      if (markPx) this.markCache.set(coin, { px: markPx, ts: Date.now() });
+      return { coin, markPx };
     }
     return { mids: all };
   }
@@ -373,10 +452,174 @@ export class HyperliquidPerpSkill implements Skill {
     const cached = this.markCache.get(coin);
     if (cached && Date.now() - cached.ts < this.MARK_TTL_MS) return cached.px;
     try {
-      const r = await this.getMarkPrice(coin);
-      return r.markPx ?? null;
+      const result = await this.getMarkPrice(coin);
+      return result.markPx ?? null;
     } catch {
       return null;
+    }
+  }
+
+  private async getLivePositions(_includeClosed: boolean): Promise<HLPaperPosition[]> {
+    const credentials = this.getLiveCredentials();
+    if (!credentials.accountAddress) return [];
+    const transport = this.createTransport();
+    const info = new InfoClient({ transport });
+    const [state, mids] = await Promise.all([
+      info.clearinghouseState({ user: credentials.accountAddress }),
+      info.allMids(),
+    ]);
+    const assetPositions = Array.isArray((state as any)?.assetPositions) ? (state as any).assetPositions : [];
+    return assetPositions
+      .map((item: any) => this.mapLivePosition(item, mids, (state as any)?.time))
+      .filter((item: HLPaperPosition | null): item is HLPaperPosition => !!item)
+      .reverse();
+  }
+
+  private mapLivePosition(item: any, mids: Record<string, string>, snapshotTime?: number): HLPaperPosition | null {
+    const position = item?.position;
+    const coin = (position?.coin || '').toUpperCase();
+    const signedSize = parseFloat(position?.szi ?? '0');
+    if (!coin || !signedSize) return null;
+    const side = signedSize > 0 ? 'long' : 'short';
+    const markPx = parseFloat(mids?.[coin] ?? position?.entryPx ?? '0');
+    const entryPx = parseFloat(position?.entryPx ?? '0');
+    const szBase = Math.abs(signedSize);
+    const szUsd = +(szBase * (markPx || entryPx || 0)).toFixed(2);
+    const leverage = parseFloat(position?.leverage?.value ?? '0') || this.state.defaultLeverage;
+    const pnlUsd = parseFloat(position?.unrealizedPnl ?? '0');
+    return {
+      id: `live:${coin}`,
+      coin,
+      side,
+      szUsd,
+      szBase,
+      leverage,
+      entryPx,
+      openedAt: snapshotTime || Date.now(),
+      pnlUsd: Number.isFinite(pnlUsd) ? +pnlUsd.toFixed(2) : undefined,
+      status: 'open',
+      source: 'manual',
+      mode: 'live',
+      reason: 'live position',
+    };
+  }
+
+  private async openLivePosition(params: {
+    coin: string;
+    side: 'long' | 'short';
+    szUsd?: number;
+    leverage?: number;
+    reason?: string;
+    source?: 'manual' | 'announcement';
+  }): Promise<{ ok: boolean; position?: HLPaperPosition; error?: string }> {
+    const coin = (params.coin || '').toUpperCase();
+    const side = params.side;
+    if (!coin || (side !== 'long' && side !== 'short')) {
+      return { ok: false, error: 'invalid coin/side' };
+    }
+    const open = await this.getLivePositions(false);
+    if (open.length >= this.state.maxOpenPositions) {
+      return { ok: false, error: `max open positions (${this.state.maxOpenPositions}) reached` };
+    }
+    if (open.some(position => position.coin === coin)) {
+      return { ok: false, error: `already open on ${coin}` };
+    }
+    const markPx = await this.getMarkPriceNumber(coin);
+    if (!markPx) return { ok: false, error: 'no mark price' };
+    const notionalUsd = params.szUsd ?? this.state.defaultSizeUsd;
+    if (!Number.isFinite(notionalUsd) || notionalUsd <= 0) {
+      return { ok: false, error: 'invalid size usd' };
+    }
+    try {
+      const { exchange, converter } = await this.createLiveClients();
+      const asset = converter.getAssetId(coin);
+      const szDecimals = converter.getSzDecimals(coin);
+      if (asset == null || szDecimals == null) {
+        return { ok: false, error: `${coin} is not available on Hyperliquid` };
+      }
+      const leverage = Math.max(1, Math.round(params.leverage ?? this.state.defaultLeverage));
+      await exchange.updateLeverage({ asset, isCross: true, leverage });
+      const sizeBase = notionalUsd / markPx;
+      const isBuy = side === 'long';
+      const aggressivePx = markPx * (1 + (isBuy ? 0.01 : -0.01));
+      await exchange.order({
+        orders: [{
+          a: asset,
+          b: isBuy,
+          p: formatPrice(aggressivePx, szDecimals),
+          s: formatSize(String(sizeBase), szDecimals),
+          r: false,
+          t: { limit: { tif: 'Ioc' } },
+        }],
+        grouping: 'na',
+      });
+      const latest = await this.getLivePositions(false);
+      const position = latest.find(item => item.coin === coin) || {
+        id: `live:${coin}`,
+        coin,
+        side,
+        szUsd: +notionalUsd.toFixed(2),
+        szBase: +sizeBase.toFixed(6),
+        leverage,
+        entryPx: markPx,
+        openedAt: Date.now(),
+        status: 'open',
+        source: params.source || 'manual',
+        mode: 'live' as const,
+        reason: params.reason || 'live order submitted',
+      };
+      this.logger.info(
+        `[Hyperliquid/Live] OPEN ${side.toUpperCase()} ${coin} @ ${markPx} | ${notionalUsd} USD | ${params.reason || ''}`
+      );
+      this.eventBus.emit('hyperliquid:position_opened' as any, position);
+      return { ok: true, position };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'live open failed' };
+    }
+  }
+
+  private async closeLivePosition(id: string): Promise<{ ok: boolean; position?: HLPaperPosition; error?: string }> {
+    const coin = (id || '').replace(/^live:/i, '').trim().toUpperCase();
+    if (!coin) return { ok: false, error: 'id is required' };
+    try {
+      const open = await this.getLivePositions(false);
+      const position = open.find(item => item.coin === coin || item.id === id);
+      if (!position || !position.szBase) {
+        return { ok: false, error: 'live position not found' };
+      }
+      const markPx = await this.getMarkPriceNumber(position.coin);
+      if (!markPx) return { ok: false, error: 'no mark price' };
+      const { exchange, converter } = await this.createLiveClients();
+      const asset = converter.getAssetId(position.coin);
+      const szDecimals = converter.getSzDecimals(position.coin);
+      if (asset == null || szDecimals == null) {
+        return { ok: false, error: `${position.coin} is not available on Hyperliquid` };
+      }
+      const isBuy = position.side === 'short';
+      const aggressivePx = markPx * (1 + (isBuy ? 0.01 : -0.01));
+      await exchange.order({
+        orders: [{
+          a: asset,
+          b: isBuy,
+          p: formatPrice(aggressivePx, szDecimals),
+          s: formatSize(String(position.szBase), szDecimals),
+          r: true,
+          t: { limit: { tif: 'Ioc' } },
+        }],
+        grouping: 'na',
+      });
+      const closed: HLPaperPosition = {
+        ...position,
+        closePx: markPx,
+        closedAt: Date.now(),
+        status: 'closed',
+        reason: position.reason || 'live close submitted',
+      };
+      this.logger.info(`[Hyperliquid/Live] CLOSE ${position.side.toUpperCase()} ${position.coin} @ ${markPx}`);
+      this.eventBus.emit('hyperliquid:position_closed' as any, closed);
+      return { ok: true, position: closed };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'live close failed' };
     }
   }
 

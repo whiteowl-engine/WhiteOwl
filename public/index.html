@@ -1574,7 +1574,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           Announce Sniper
           <span class="nav-badge" id="annNavBadge" style="display:none">0</span>
         </div>
-        <div class="nav-item" data-v="hyperliquid" onclick="go('hyperliquid')" title="Hyperliquid perp adapter (paper)">
+        <div class="nav-item" data-v="hyperliquid" onclick="go('hyperliquid')" title="Hyperliquid perp adapter">
           <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
           HL Perps
         </div>
@@ -2812,10 +2812,11 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           <div class="welcome-bar">
             <div>
               <h1>Hyperliquid Perps</h1>
-              <p id="hlStatusText">Loading Hyperliquid paper adapter...</p>
+              <p id="hlStatusText">Loading Hyperliquid execution desk...</p>
               <div class="ops-status-line">
                 <span class="badge badge-yellow" id="hlModeBadge">paper</span>
                 <span class="badge badge-blue" id="hlAnnBadge">announcement shorts off</span>
+                <span class="badge badge-green" id="hlLiveBadge">live ready unknown</span>
               </div>
             </div>
             <div class="ops-header-actions">
@@ -2824,17 +2825,18 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           </div>
 
           <div class="g g4">
-            <div class="stat s-yellow"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3.5 9.74-7 10-3.5-.26-7-5-7-10V6l7-4z"/></svg></div><div class="s-label">Mode</div><div class="s-value" id="hlStatMode">Paper</div><div class="s-sub">live signing disabled</div></div>
-            <div class="stat s-blue"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></div><div class="s-label">Open</div><div class="s-value" id="hlStatOpen">0/0</div><div class="s-sub">paper positions</div></div>
+            <div class="stat s-yellow"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3.5 9.74-7 10-3.5-.26-7-5-7-10V6l7-4z"/></svg></div><div class="s-label">Mode</div><div class="s-value" id="hlStatMode">Paper</div><div class="s-sub" id="hlStatModeSub">execution route</div></div>
+            <div class="stat s-blue"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></div><div class="s-label">Open</div><div class="s-value" id="hlStatOpen">0/0</div><div class="s-sub" id="hlStatOpenSub">active positions</div></div>
             <div class="stat s-green"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="s-label">Default Size</div><div class="s-value" id="hlStatSize">$0</div><div class="s-sub">per signal</div></div>
-            <div class="stat s-purple"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-6"/></svg></div><div class="s-label">Leverage</div><div class="s-value" id="hlStatLev">0x</div><div class="s-sub">default paper lev</div></div>
+            <div class="stat s-purple"><div class="stat-deco"></div><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-6"/></svg></div><div class="s-label">Leverage</div><div class="s-value" id="hlStatLev">0x</div><div class="s-sub" id="hlStatLevSub">default leverage</div></div>
           </div>
 
           <div class="card">
             <div class="card-h"><h3>Controls</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="hlApplyConfig()">Apply Config</button></div></div>
             <div class="card-b">
               <div class="ops-control-grid" style="margin-bottom:14px">
-                <div class="ops-control-card"><div><div class="ops-control-title">Auto-short Bearish Announcements</div><div class="ops-control-copy">When enabled, bearish score >= 85 announcements can open paper shorts.</div></div><label class="toggle-switch"><input type="checkbox" id="hlAnnToggle"><span class="toggle-slider"></span></label></div>
+                <div class="ops-control-card"><div><div class="ops-control-title">Execution Mode</div><div class="ops-control-copy">Keep Hyperliquid in paper mode for simulation or switch to live mode for signed exchange orders.</div></div><label class="toggle-switch"><input type="checkbox" id="hlModeToggle"><span class="toggle-slider"></span></label></div>
+                <div class="ops-control-card"><div><div class="ops-control-title">Auto-short Bearish Announcements</div><div class="ops-control-copy">When enabled, bearish score >= 85 announcements can open Hyperliquid shorts in the current mode.</div></div><label class="toggle-switch"><input type="checkbox" id="hlAnnToggle"><span class="toggle-slider"></span></label></div>
               </div>
               <div class="ops-form-grid">
                 <div><label class="ops-control-copy">Default size USD</label><input id="hlDefaultSize" type="number" min="1" step="1" placeholder="250"></div>
@@ -2846,7 +2848,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
           </div>
 
           <div class="card">
-            <div class="card-h"><h3>Manual Paper Open</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="hlPrefillFunding()">Prefill Funding</button></div></div>
+            <div class="card-h"><h3 id="hlManualTitle">Manual Position Open</h3><div class="actions"><button class="btn btn-ghost btn-xs" onclick="hlPrefillFunding()">Prefill Funding</button></div></div>
             <div class="card-b">
               <div class="ops-form-grid">
                 <input id="hlOpenCoin" placeholder="COIN, e.g. BTC">
@@ -2854,7 +2856,7 @@ input::placeholder,textarea:not(.xterm-helper-textarea)::placeholder{color:var(-
                 <input id="hlOpenSize" type="number" min="1" step="1" placeholder="Size USD">
                 <input id="hlOpenLev" type="number" min="1" step="1" placeholder="Leverage">
                 <input id="hlOpenReason" placeholder="Reason">
-                <button class="btn btn-primary" onclick="hlOpenPosition()">Open Paper Position</button>
+                <button class="btn btn-primary" id="hlOpenButton" onclick="hlOpenPosition()">Open Position</button>
               </div>
             </div>
           </div>
@@ -5001,9 +5003,21 @@ function annSkip(id) {
 function initHyperliquidPanel() {
   if (hyperliquidPanelBound) return;
   hyperliquidPanelBound = true;
+  var modeToggle = $('#hlModeToggle');
+  if (modeToggle) modeToggle.addEventListener('change', function(event) {
+    if (!event.target.checked && !confirm('Switch Hyperliquid to paper mode?')) {
+      event.target.checked = true;
+      return;
+    }
+    if (event.target.checked && !confirm('Enable live Hyperliquid mode? Signed orders will be sent when you open or close positions.')) {
+      event.target.checked = false;
+      return;
+    }
+    hlApplyConfig();
+  });
   var annToggle = $('#hlAnnToggle');
   if (annToggle) annToggle.addEventListener('change', function(event) {
-    if (event.target.checked && !confirm('Enable paper auto-shorts from bearish announcements?')) {
+    if (event.target.checked && !confirm('Enable announcement-triggered Hyperliquid shorts in the current mode?')) {
       event.target.checked = false;
       return;
     }
@@ -5033,11 +5047,19 @@ function loadHyperliquid() {
 
 function renderHyperliquidStatus(status) {
   var text = $('#hlStatusText');
-  if (text) text.textContent = (status.note || 'Paper-only Hyperliquid adapter') + ' - default $' + (status.defaultSizeUsd || 0) + ' x' + (status.defaultLeverage || 0);
+  if (text) text.textContent = (status.note || 'Hyperliquid execution desk') + ' - default $' + (status.defaultSizeUsd || 0) + ' x' + (status.defaultLeverage || 0);
   var modeBadge = $('#hlModeBadge');
-  if (modeBadge) { modeBadge.className = 'badge badge-yellow'; modeBadge.textContent = status.paperMode ? 'PAPER' : 'LIVE'; }
+  if (modeBadge) { modeBadge.className = 'badge ' + (status.paperMode ? 'badge-yellow' : 'badge-red'); modeBadge.textContent = status.paperMode ? 'PAPER' : 'LIVE'; }
   var annBadge = $('#hlAnnBadge');
   if (annBadge) { annBadge.className = 'badge ' + (status.enableShortFromAnnouncement ? 'badge-red' : 'badge-blue'); annBadge.textContent = status.enableShortFromAnnouncement ? 'announcement shorts on' : 'announcement shorts off'; }
+  var liveBadge = $('#hlLiveBadge');
+  if (liveBadge) {
+    var liveReady = !!status.liveReady;
+    liveBadge.className = 'badge ' + (liveReady ? 'badge-green' : 'badge-yellow');
+    liveBadge.textContent = liveReady ? 'live ready' : 'live credentials missing';
+  }
+  var modeToggle = $('#hlModeToggle');
+  if (modeToggle) modeToggle.checked = !status.paperMode;
   var annToggle = $('#hlAnnToggle');
   if (annToggle) annToggle.checked = !!status.enableShortFromAnnouncement;
   var sizeInput = $('#hlDefaultSize');
@@ -5048,16 +5070,28 @@ function renderHyperliquidStatus(status) {
   if (maxInput && document.activeElement !== maxInput) maxInput.value = status.maxOpenPositions || '';
   var statMode = $('#hlStatMode');
   if (statMode) statMode.textContent = status.paperMode ? 'Paper' : 'Live';
+  var statModeSub = $('#hlStatModeSub');
+  if (statModeSub) statModeSub.textContent = status.paperMode ? 'local simulation route' : 'signed Hyperliquid route';
   var statOpen = $('#hlStatOpen');
   if (statOpen) statOpen.textContent = (status.openCount || 0) + '/' + (status.maxOpenPositions || 0);
+  var statOpenSub = $('#hlStatOpenSub');
+  if (statOpenSub) statOpenSub.textContent = status.paperMode ? 'paper positions' : 'live exchange positions';
   var statSize = $('#hlStatSize');
   if (statSize) statSize.textContent = '$' + (status.defaultSizeUsd || 0);
   var statLev = $('#hlStatLev');
   if (statLev) statLev.textContent = (status.defaultLeverage || 0) + 'x';
+  var statLevSub = $('#hlStatLevSub');
+  if (statLevSub) statLevSub.textContent = status.paperMode ? 'default paper leverage' : 'live order sizing hint';
+  var manualTitle = $('#hlManualTitle');
+  if (manualTitle) manualTitle.textContent = status.paperMode ? 'Manual Paper Open' : 'Manual Live Open';
+  var openButton = $('#hlOpenButton');
+  if (openButton) openButton.textContent = status.paperMode ? 'Open Paper Position' : 'Open Live Position';
 }
 
 function hlApplyConfig() {
   var patch = {};
+  var modeToggle = $('#hlModeToggle');
+  if (modeToggle) patch.paperMode = !modeToggle.checked;
   var annToggle = $('#hlAnnToggle');
   if (annToggle) patch.enableShortFromAnnouncement = !!annToggle.checked;
   var size = Number($('#hlDefaultSize') && $('#hlDefaultSize').value);
@@ -5075,6 +5109,7 @@ function hlApplyConfig() {
 function hlOpenPosition() {
   var coin = (($('#hlOpenCoin') && $('#hlOpenCoin').value) || '').trim().toUpperCase();
   if (!coin) { toast('Coin is required', 'error'); return; }
+  var liveMode = $('#hlModeToggle') && $('#hlModeToggle').checked;
   var body = {
     coin: coin,
     side: ($('#hlOpenSide') && $('#hlOpenSide').value) || 'long'
@@ -5087,7 +5122,7 @@ function hlOpenPosition() {
   if (reason) body.reason = reason;
   api('/api/hyperliquid/open', 'POST', body).then(function(result) {
     if (result && result.ok === false) throw new Error(result.error || 'Open failed');
-    toast('Paper position opened', 'success');
+    toast(liveMode ? 'Live position opened' : 'Paper position opened', 'success');
     var coinInput = $('#hlOpenCoin');
     var reasonInput = $('#hlOpenReason');
     if (coinInput) coinInput.value = '';
@@ -5097,10 +5132,11 @@ function hlOpenPosition() {
 }
 
 function hlClosePosition(id) {
-  if (!confirm('Close this paper position?')) return;
+  var liveMode = $('#hlModeToggle') && $('#hlModeToggle').checked;
+  if (!confirm(liveMode ? 'Close this live position?' : 'Close this paper position?')) return;
   api('/api/hyperliquid/close/' + encodeURIComponent(id), 'POST').then(function(result) {
     if (result && result.ok === false) throw new Error(result.error || 'Close failed');
-    toast('Paper position closed', 'success');
+    toast(liveMode ? 'Live position closed' : 'Paper position closed', 'success');
     loadHyperliquid();
   }).catch(function(error) { toast(error.message, 'error'); });
 }
