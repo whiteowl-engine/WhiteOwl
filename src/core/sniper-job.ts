@@ -2747,8 +2747,8 @@ getPaperStatus(): {
     realBalance: number;
     balanceOverride: number | null;
     paperPnl: number;
-    stats: typeof this.paperStats;
-    recentTrades: typeof this.paperTrades;
+    stats: any;
+    recentTrades: any;
     readyForLive: boolean;
   } {
     return {

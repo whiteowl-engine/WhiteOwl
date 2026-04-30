@@ -307,7 +307,7 @@ export interface TelegramChannelConfig {
 }
 
 export async function fetchTelegramChannel(config: TelegramChannelConfig, logger: LoggerInterface): Promise<NewsItem[]> {
-  const url = `https://t.me/s/${channel}`;
+  const url = `https://t.me/s/${config.channel}`;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);

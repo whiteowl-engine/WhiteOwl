@@ -146,7 +146,7 @@ private async ensureAxiomAccessToken(): Promise<void> {
       }
 
       try {
-        const body = await resp.json();
+        const body = await resp.json() as any;
         if (body?.accessToken) {
           const existing = this.axiomCookies.find(c => c.name === 'auth-access-token');
           if (existing) {

@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as http from 'http';
@@ -135,7 +135,7 @@ function inspectorScript(port: number): string {
   var hl=null,OUTLINE='3px solid #7c3aed',OUTLINE_BG='rgba(124,58,237,0.08)';
   var badge=document.createElement('div');
   badge.id='__axiom_badge';
-  badge.innerHTML='<span style="margin-right:6px">\\u{1F989}</span> WhiteOwl Inspector â€” click any element (ESC to exit)';
+  badge.innerHTML='<span style="margin-right:6px">\\u{1F989}</span> WhiteOwl Inspector Ã¢â‚¬â€ click any element (ESC to exit)';
   badge.style.cssText='position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483647;background:linear-gradient(135deg,#1e1b4b,#312e81);color:#c4b5fd;font:600 13px/1 system-ui,sans-serif;padding:10px 20px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);cursor:default;user-select:none;pointer-events:auto;border:1px solid #4c1d95';
   document.body.appendChild(badge);
   function onOver(e){
@@ -167,7 +167,7 @@ function inspectorScript(port: number): string {
     var payload={selector:getSelector(el),tag:el.tagName.toLowerCase(),html:htm,text:(el.innerText||'').substring(0,200),url:location.href};
     fetch(API+'/api/browser/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),mode:'cors'}).then(function(){
       badge.innerHTML='<span style="margin-right:6px">\\u2705</span> Sent: &lt;'+payload.tag+'&gt; '+payload.selector.substring(0,40);
-      setTimeout(function(){badge.innerHTML='<span style="margin-right:6px">\\u{1F989}</span> WhiteOwl Inspector â€” click another element (ESC to exit)'},1500);
+      setTimeout(function(){badge.innerHTML='<span style="margin-right:6px">\\u{1F989}</span> WhiteOwl Inspector Ã¢â‚¬â€ click another element (ESC to exit)'},1500);
     }).catch(function(err){
       badge.innerHTML='<span style="margin-right:6px">\\u274C</span> Error: '+err.message;
     });
@@ -1504,12 +1504,12 @@ async function _fetchImageAsBase64(imageUrl: string): Promise<string | undefined
       const imageBase64 = imageUrl ? await _fetchImageAsBase64(imageUrl) : undefined;
       const hasImage = Boolean(imageBase64);
 
-      const prompt = `You are a top Pump.fun meme-coin creator. Your job is to create a VIRAL, catchy token name based on the tweet below.${hasImage ? ' An image from the post is attached â€” analyze it carefully for meme references, characters, animals, emotions, or visual gags that can inspire the token.' : ''}
+      const prompt = `You are a top Pump.fun meme-coin creator. Your job is to create a VIRAL, catchy token name based on the tweet below.${hasImage ? ' An image from the post is attached Ã¢â‚¬â€ analyze it carefully for meme references, characters, animals, emotions, or visual gags that can inspire the token.' : ''}
 Return strictly valid JSON with three keys: "name", "symbol", and "description".
 
 RULES for "name":
 - Must be catchy, memeable, and FUN (think: $PEPE, $DOGE, $BONK, $WIF)
-- If the post mentions a person, animal, object, or meme â€” build the name around THAT
+- If the post mentions a person, animal, object, or meme Ã¢â‚¬â€ build the name around THAT
 - Use wordplay, puns, abbreviations, or internet slang when fitting
 - Max 20 chars, no generic names like "Shield Token" or "Post Token"
 - One or two words is ideal
@@ -1845,13 +1845,13 @@ Do NOT explain or add any other text.`;
       }
 
       if (!createdTs) {
-        return res.json({ ok: false, error: 'Token not indexed yet â€” no chart data available' });
+        return res.json({ ok: false, error: 'Token not indexed yet Ã¢â‚¬â€ no chart data available' });
       }
 
       const url = `https://swap-api.pump.fun/v2/coins/${mint}/candles?interval=1m&limit=200&currency=USD&program=pump&createdTs=${createdTs}`;
       const candleResp = await fetch(url, { headers: PUMP_HDRS, signal: AbortSignal.timeout(8000) });
       if (!candleResp.ok) return res.status(candleResp.status).json({ ok: false, error: `pump.fun candle API ${candleResp.status}` });
-      const raw: any[] = await candleResp.json();
+      const raw = await candleResp.json() as any[];
 
       const candles = raw.map((c: any) => ({
         ts: Math.floor((c.timestamp || 0) / 1000),
@@ -1996,7 +1996,7 @@ Do NOT explain or add any other text.`;
 
 
       if (isPublicRpc) {
-        logger.info('Public RPC detected â€” skipping getParsedTransaction to avoid 429 rate limits');
+        logger.info('Public RPC detected Ã¢â‚¬â€ skipping getParsedTransaction to avoid 429 rate limits');
         return;
       }
 
@@ -2853,7 +2853,7 @@ Do NOT explain or add any other text.`;
       if (check.allLocal && allKeys.length > 1 && !confirmed) {
         return res.status(200).json({
           warning: true,
-          message: 'All member keys are imported in this wallet. This means a single device controls the entire vault â€” reduced security compared to using external signers. Continue anyway?',
+          message: 'All member keys are imported in this wallet. This means a single device controls the entire vault Ã¢â‚¬â€ reduced security compared to using external signers. Continue anyway?',
           local: check.local,
           external: check.external,
           feePayer: activeAddr,
@@ -2991,7 +2991,7 @@ Do NOT explain or add any other text.`;
     _walletResCache = { data: null, ts: 0 };
     _balCache = { address: '', balance: 0, ts: 0 };
     broadcastWalletChanged();
-    logger.info('[Vault Mode] Deactivated â€” back to regular wallet');
+    logger.info('[Vault Mode] Deactivated Ã¢â‚¬â€ back to regular wallet');
     res.json({ ok: true });
   });
 
@@ -3203,7 +3203,7 @@ Do NOT explain or add any other text.`;
         useXmr: false,
       };
 
-      logger.info(`Creating Houdini exchange: ${amount} SOL â†’ ${to}`);
+      logger.info(`Creating Houdini exchange: ${amount} SOL Ã¢â€ â€™ ${to}`);
 
             const exResp = await fetch(`${HOUDINI_API}/exchange`, {
                 method: 'POST',
@@ -3234,7 +3234,7 @@ Do NOT explain or add any other text.`;
         return res.status(500).json({ error: 'Houdini did not return a deposit address (senderAddress)' });
       }
 
-      logger.info(`Houdini exchange ${houdiniId} created â€” deposit ${depositAmount} SOL to ${senderAddress} (ETA: ${exData.eta || '?'} min)`);
+      logger.info(`Houdini exchange ${houdiniId} created Ã¢â‚¬â€ deposit ${depositAmount} SOL to ${senderAddress} (ETA: ${exData.eta || '?'} min)`);
 
 
       const lamports = Math.round(depositAmount * LAMPORTS_PER_SOL);
@@ -3255,7 +3255,7 @@ Do NOT explain or add any other text.`;
       } else {
         sig = await w.signAndSend(tx);
       }
-      logger.info(`Houdini deposit sent: ${sig} (${depositAmount} SOL â†’ ${senderAddress})`);
+      logger.info(`Houdini deposit sent: ${sig} (${depositAmount} SOL Ã¢â€ â€™ ${senderAddress})`);
 
 
       res.json({
@@ -3408,7 +3408,7 @@ Do NOT explain or add any other text.`;
 
           conn.confirmTransaction(sig, 'confirmed')
             .then(() => logger.info(`Provider tx confirmed: ${sig}`))
-            .catch((e: any) => logger.warn(`Provider tx confirm timeout (tx may still succeed): ${sig} â€” ${e.message}`));
+            .catch((e: any) => logger.warn(`Provider tx confirm timeout (tx may still succeed): ${sig} Ã¢â‚¬â€ ${e.message}`));
           return;
         } else {
 
@@ -3574,7 +3574,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
             } catch {}
             if (!found) {
               results.push({
-                address: q, symbol: q.slice(0, 4) + 'â€¦', name: 'Unknown Token',
+                address: q, symbol: q.slice(0, 4) + 'Ã¢â‚¬Â¦', name: 'Unknown Token',
                 logoURI: '', decimals: 9, verified: false, daily_volume: 0,
               });
             }
@@ -4046,13 +4046,13 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
       }
       const slip = (slippageBps as string) || '50';
 
-      const url = `https://api.jup.ag/swap/v1/quote?inputMint=${encode(inputMint as string)}&outputMint=${encode(outputMint as string)}&amount=${encode(amount as string)}&slippageBps=${encode(slip)}`;
+      const url = `https://api.jup.ag/swap/v1/quote?inputMint=${encodeURIComponent(inputMint as string)}&outputMint=${encodeURIComponent(outputMint as string)}&amount=${encodeURIComponent(amount as string)}&slippageBps=${encodeURIComponent(slip)}`;
       const resp = await fetch(url);
       if (!resp.ok) {
         const txt = await resp.text().catch(() => '');
         return res.status(resp.status).json({ error: `Quote API returned ${resp.status}`, detail: txt });
       }
-      const data = await resp.json();
+      const data = await resp.json() as any;
       res.json(data);
     } catch (err: any) {
       logger.error('Quote proxy error:', err.message);
@@ -4292,9 +4292,9 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
       for (const ix of compiledIxs) {
         const progIdx = ix.programIdIndex;
         const progAddr = accountKeys[progIdx] || 'unknown';
-        const progName = PROGRAMS[progAddr] || progAddr.slice(0, 8) + 'â€¦';
+        const progName = PROGRAMS[progAddr] || progAddr.slice(0, 8) + 'Ã¢â‚¬Â¦';
         const data = ix.data instanceof Uint8Array ? ix.data : Buffer.from(ix.data || []);
-        const accs = (ix.accountKeyIndexes || ix.accounts || []).map((i: number) => accountKeys[i] || '?');
+        const accs = (ix.accountKeyIndexes || []).map((i: number) => accountKeys[i] || '?');
 
         let ixType = 'unknown';
         const details: Record<string, any> = {};
@@ -4305,7 +4305,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
           if (ixId === 2) {
             ixType = 'SOL Transfer';
             if (data.length >= 12) {
-              const lamports = Number(data.readBigUInt64LE(4));
+              const lamports = Number((data as Buffer).readBigUInt64LE(4));
               details.amount = lamports / 1e9;
               details.from = accs[0];
               details.to = accs[1];
@@ -4324,7 +4324,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
             details.newOwner = accs[1];
             if (accs[0] === walletAddr) {
               riskScore += 50;
-              warnings.push({ level: 'danger', message: 'ðŸš¨ Attempting to reassign ownership of your account!' });
+              warnings.push({ level: 'danger', message: 'Ã°Å¸Å¡Â¨ Attempting to reassign ownership of your account!' });
             }
           }
         }
@@ -4335,7 +4335,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
           if (ixId === 3) {
             ixType = 'Token Transfer';
             if (data.length >= 9) {
-              const rawAmount = Number(data.readBigUInt64LE(1));
+              const rawAmount = Number((data as Buffer).readBigUInt64LE(1));
               details.from = accs[0];
               details.to = accs[1];
               details.authority = accs[2];
@@ -4343,9 +4343,9 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
               if (accs[2] === walletAddr) details.direction = 'outgoing';
             }
           } else if (ixId === 4) {
-            ixType = 'âš ï¸ Token Approve (Delegation)';
+            ixType = 'Ã¢Å¡Â Ã¯Â¸Â Token Approve (Delegation)';
             if (data.length >= 9) {
-              const rawAmount = Number(data.readBigUInt64LE(1));
+              const rawAmount = Number((data as Buffer).readBigUInt64LE(1));
               details.tokenAccount = accs[0];
               details.delegate = accs[1];
               details.owner = accs[2];
@@ -4354,11 +4354,11 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
                 riskScore += 35;
                 warnings.push({
                   level: 'danger',
-                  message: `Grants token spend approval to ${accs[1].slice(0, 8)}â€¦ â€” they can move your tokens!`,
+                  message: `Grants token spend approval to ${accs[1].slice(0, 8)}Ã¢â‚¬Â¦ Ã¢â‚¬â€ they can move your tokens!`,
                 });
                 if (rawAmount > 1e15) {
                   riskScore += 20;
-                  warnings.push({ level: 'danger', message: 'Unlimited token approval â€” maximum risk!' });
+                  warnings.push({ level: 'danger', message: 'Unlimited token approval Ã¢â‚¬â€ maximum risk!' });
                 }
               }
             }
@@ -4367,13 +4367,13 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
             details.tokenAccount = accs[0];
             details.owner = accs[1];
           } else if (ixId === 6) {
-            ixType = 'âš ï¸ SetAuthority';
+            ixType = 'Ã¢Å¡Â Ã¯Â¸Â SetAuthority';
             details.account = accs[0];
             details.currentAuthority = accs[1];
             if (data.length > 1) details.authorityType = data[1];
             if (accs[1] === walletAddr) {
               riskScore += 40;
-              warnings.push({ level: 'danger', message: 'Changes authority on your token account â€” potential drain vector!' });
+              warnings.push({ level: 'danger', message: 'Changes authority on your token account Ã¢â‚¬â€ potential drain vector!' });
             }
           } else if (ixId === 7) {
             ixType = 'Mint Tokens';
@@ -4392,14 +4392,14 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
             details.authority = accs[3];
             if (accs[3] === walletAddr) details.direction = 'outgoing';
           } else if (ixId === 13) {
-            ixType = 'âš ï¸ Token ApproveChecked';
+            ixType = 'Ã¢Å¡Â Ã¯Â¸Â Token ApproveChecked';
             details.tokenAccount = accs[0];
             details.mint = accs[1];
             details.delegate = accs[2];
             details.owner = accs[3];
             if (accs[3] === walletAddr) {
               riskScore += 35;
-              warnings.push({ level: 'danger', message: `Grants checked token approval to ${accs[2].slice(0, 8)}â€¦` });
+              warnings.push({ level: 'danger', message: `Grants checked token approval to ${accs[2].slice(0, 8)}Ã¢â‚¬Â¦` });
             }
           }
         }
@@ -4412,7 +4412,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
           if (ixType === 'unknown') {
             ixType = 'Unknown Program Call';
             riskScore += 10;
-            warnings.push({ level: 'warning', message: `Calls unverified program: ${progAddr.slice(0, 12)}â€¦` });
+            warnings.push({ level: 'warning', message: `Calls unverified program: ${progAddr.slice(0, 12)}Ã¢â‚¬Â¦` });
           }
         }
 
@@ -4457,15 +4457,15 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
 
       if (hasApprove && hasUnknownPrograms) {
         riskScore += 25;
-        warnings.push({ level: 'danger', message: 'ðŸš¨ Token approval + unknown program = common drainer pattern!' });
+        warnings.push({ level: 'danger', message: 'Ã°Å¸Å¡Â¨ Token approval + unknown program = common drainer pattern!' });
       }
       if (hasSetAuthority && hasUnknownPrograms) {
         riskScore += 30;
-        warnings.push({ level: 'danger', message: 'ðŸš¨ Authority change + unknown program = high drainer risk!' });
+        warnings.push({ level: 'danger', message: 'Ã°Å¸Å¡Â¨ Authority change + unknown program = high drainer risk!' });
       }
       if (hasApprove && hasTransfer) {
         riskScore += 15;
-        warnings.push({ level: 'warning', message: 'Approval + transfer in same transaction â€” verify carefully' });
+        warnings.push({ level: 'warning', message: 'Approval + transfer in same transaction Ã¢â‚¬â€ verify carefully' });
       }
 
       riskScore = Math.min(100, riskScore);
@@ -4590,16 +4590,16 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
       for (let i = 0; i < compiledIxs.length; i++) {
         const ix = compiledIxs[i];
         const progAddr = accountKeys[ix.programIdIndex] || 'unknown';
-        const progName = KNOWN_PROGRAMS[progAddr] || `Unknown (${progAddr.slice(0, 16)}â€¦)`;
-        const ixAccounts = (ix.accountKeyIndexes || ix.accounts || []).map((idx: number) => accountKeys[idx] || '?');
+        const progName = KNOWN_PROGRAMS[progAddr] || `Unknown (${progAddr.slice(0, 16)}Ã¢â‚¬Â¦)`;
+        const ixAccounts = (ix.accountKeyIndexes || []).map((idx: number) => accountKeys[idx] || '?');
         const data = ix.data instanceof Uint8Array ? ix.data : Buffer.from(ix.data || []);
 
         context += `  [${i + 1}] Program: ${progName}\n`;
         context += `      Accounts (${ixAccounts.length}): `;
         const accSummary = ixAccounts.map((a: string) => {
-          if (a === walletAddr) return `${a.slice(0, 8)}â€¦ [YOUR WALLET]`;
-          if (KNOWN_PROGRAMS[a]) return `${a.slice(0, 8)}â€¦ [${KNOWN_PROGRAMS[a]}]`;
-          return `${a.slice(0, 12)}â€¦`;
+          if (a === walletAddr) return `${a.slice(0, 8)}Ã¢â‚¬Â¦ [YOUR WALLET]`;
+          if (KNOWN_PROGRAMS[a]) return `${a.slice(0, 8)}Ã¢â‚¬Â¦ [${KNOWN_PROGRAMS[a]}]`;
+          return `${a.slice(0, 12)}Ã¢â‚¬Â¦`;
         }).join(', ');
         context += accSummary + '\n';
         if (data.length > 0) context += `      Data: ${data.length} bytes (discriminator: 0x${Buffer.from(data.slice(0, 8)).toString('hex')})\n`;
@@ -4616,8 +4616,8 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
             context += `  - ${ix.type} (${ix.programName})`;
             if (ix.details.amount != null) context += ` amount:${ix.details.amount}`;
             if (ix.details.delegate) context += ` delegate:${ix.details.delegate}`;
-            if (ix.details.from) context += ` from:${ix.details.from.slice(0, 12)}â€¦`;
-            if (ix.details.to) context += ` to:${ix.details.to.slice(0, 12)}â€¦`;
+            if (ix.details.from) context += ` from:${ix.details.from.slice(0, 12)}Ã¢â‚¬Â¦`;
+            if (ix.details.to) context += ` to:${ix.details.to.slice(0, 12)}Ã¢â‚¬Â¦`;
             if (ix.details.direction) context += ` [${ix.details.direction}]`;
             context += `\n`;
           }
@@ -4625,7 +4625,7 @@ async function batchCheckJupiterVerified(mints: string[]): Promise<void> {
         if (simulationResult.balanceChanges?.length) {
           context += `\nSOL balance changes:\n`;
           for (const c of simulationResult.balanceChanges) {
-            context += `  ${c.account === walletAddr ? 'YOUR WALLET' : c.account.slice(0, 12) + 'â€¦'}: ${c.diff > 0 ? '+' : ''}${c.diff.toFixed(6)} SOL\n`;
+            context += `  ${c.account === walletAddr ? 'YOUR WALLET' : c.account.slice(0, 12) + 'Ã¢â‚¬Â¦'}: ${c.diff > 0 ? '+' : ''}${c.diff.toFixed(6)} SOL\n`;
           }
         }
         if (simulationResult.warnings?.length) {
@@ -4643,27 +4643,27 @@ ${context}
 
 ANALYSIS GUIDELINES:
 1. First identify the TRANSACTION PURPOSE based on the programs invoked:
-   - Magic Eden / Tensor / Hadeswap programs â†’ NFT buy, sell, list, delist, bid, cancel
-   - Jupiter / Raydium / Orca programs â†’ Token swap / DEX trade
-   - pump.fun programs â†’ Memecoin buy/sell on bonding curve
-   - Metaplex Metadata + Token Program â†’ NFT mint, metadata update
-   - System Program SOL Transfer alone â†’ Simple SOL transfer
-   - Stake Program â†’ SOL staking/unstaking
-   - Token Approve/SetAuthority â†’ Permission grant (scrutinize carefully!)
-   - Bubblegum / SPL Compression â†’ Compressed NFT operations
+   - Magic Eden / Tensor / Hadeswap programs Ã¢â€ â€™ NFT buy, sell, list, delist, bid, cancel
+   - Jupiter / Raydium / Orca programs Ã¢â€ â€™ Token swap / DEX trade
+   - pump.fun programs Ã¢â€ â€™ Memecoin buy/sell on bonding curve
+   - Metaplex Metadata + Token Program Ã¢â€ â€™ NFT mint, metadata update
+   - System Program SOL Transfer alone Ã¢â€ â€™ Simple SOL transfer
+   - Stake Program Ã¢â€ â€™ SOL staking/unstaking
+   - Token Approve/SetAuthority Ã¢â€ â€™ Permission grant (scrutinize carefully!)
+   - Bubblegum / SPL Compression Ã¢â€ â€™ Compressed NFT operations
 
 2. Known-safe patterns (DO NOT flag as suspicious unless there are additional red flags):
-   - Magic Eden v2/v3 buy/sell from magiceden.io â†’ SAFE (standard NFT marketplace)
-   - Jupiter swap from jup.ag â†’ SAFE (standard DEX aggregator)
-   - Compute Budget instructions â†’ SAFE (gas optimization, always present)
-   - Associated Token Account creation â†’ SAFE (needed for receiving tokens)
-   - SOL transfer of small amounts (<0.5 SOL) as part of NFT buy â†’ SAFE (payment)
+   - Magic Eden v2/v3 buy/sell from magiceden.io Ã¢â€ â€™ SAFE (standard NFT marketplace)
+   - Jupiter swap from jup.ag Ã¢â€ â€™ SAFE (standard DEX aggregator)
+   - Compute Budget instructions Ã¢â€ â€™ SAFE (gas optimization, always present)
+   - Associated Token Account creation Ã¢â€ â€™ SAFE (needed for receiving tokens)
+   - SOL transfer of small amounts (<0.5 SOL) as part of NFT buy Ã¢â€ â€™ SAFE (payment)
 
 3. DANGEROUS patterns to flag:
    - Token Approve/ApproveChecked granting delegate authority to unknown addresses
    - SetAuthority changing ownership of your token accounts
    - Large SOL transfers (>5 SOL) to unknown wallets outside of known programs
-   - Unknown programs combined with approvals â€” classic drainer pattern
+   - Unknown programs combined with approvals Ã¢â‚¬â€ classic drainer pattern
    - Domain mismatch (e.g., "magiceden" typosquat)
 
 Respond ONLY with valid JSON (no markdown, no code fences):
@@ -4765,7 +4765,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       if (walletPatterns?.length) {
         context += `\n=== WALLET/CRYPTO JS PATTERNS DETECTED ===\n`;
         for (const wp of walletPatterns as any[]) {
-          context += `  ${wp.pattern} (×${wp.count})\n`;
+          context += `  ${wp.pattern} (Ã—${wp.count})\n`;
         }
       }
 
@@ -4797,13 +4797,13 @@ Respond ONLY with valid JSON (no markdown, no code fences):
 ${context}
 
 YOUR ANALYSIS METHODOLOGY:
-1. FIRST — identify what this site IS. Check the domain, title, meta tags, page content. Is this a well-known dApp (DEX, NFT marketplace, DeFi, launchpad, trading terminal)? Or an unknown site?
+1. FIRST â€” identify what this site IS. Check the domain, title, meta tags, page content. Is this a well-known dApp (DEX, NFT marketplace, DeFi, launchpad, trading terminal)? Or an unknown site?
 
-2. WELL-KNOWN LEGITIMATE SITES — these are SAFE by default when on their real domains:
+2. WELL-KNOWN LEGITIMATE SITES â€” these are SAFE by default when on their real domains:
    pump.fun, magiceden.io, phantom.app, jup.ag, raydium.io, tensor.trade, orca.so, drift.trade, marinade.finance, marginfi.com, kamino.finance, birdeye.so, dexscreener.com, axiom.trade, bullx.io, photon-sol.tinyastro.io, defined.fi, backpack.app, helius.dev, metaplex.com, solscan.io, solana.fm, uniswap.org, opensea.io, blur.io, lido.fi, aave.com, coinbase.com, binance.com, okx.com, bybit.com, kraken.com
-   If the site is one of these on its official domain → verdict "safe", period. Don't overthink it.
+   If the site is one of these on its official domain â†’ verdict "safe", period. Don't overthink it.
 
-3. ONLY IF the site is NOT a known legitimate project — analyze the JavaScript code for actual drainer signatures:
+3. ONLY IF the site is NOT a known legitimate project â€” analyze the JavaScript code for actual drainer signatures:
    - CRITICAL DANGER: setAuthority, createApproveInstruction (token delegation/theft)
    - CRITICAL DANGER: VersionedTransaction.deserialize + signAllTransactions (blind signing of external payloads)
    - CRITICAL DANGER: eval() / Function() with obfuscated payloads, atob() with huge base64 strings
@@ -4812,12 +4812,12 @@ YOUR ANALYSIS METHODOLOGY:
    - CRITICAL DANGER: skipPreflight:true combined with externally-built transactions
    - SUSPICIOUS: Free hosting (vercel.app, netlify.app, pages.dev) + "airdrop/claim/reward" language
    - SUSPICIOUS: Typosquat domains (phant0m.app, magiced3n.io, etc.)
-   - SUSPICIOUS: All links are # or javascript:void — no real navigation
+   - SUSPICIOUS: All links are # or javascript:void â€” no real navigation
    - SUSPICIOUS: Countdown timers + urgency language + "limited supply" + "claim now"
    - NORMAL/SAFE: Standard wallet adapter (@solana/wallet-adapter), createTransferInstruction, SystemProgram.transfer, normal swap/trade logic
    - NORMAL/SAFE: Analytics scripts (google, segment, amplitude, datadog, sentry), CDN scripts (unpkg, cdnjs, jsdelivr), web-vitals
-   - NORMAL/SAFE: Hidden iframes for analytics/tracking/auth — every major site has these
-   - NORMAL/SAFE: Minified/bundled JavaScript — every production site minifies code
+   - NORMAL/SAFE: Hidden iframes for analytics/tracking/auth â€” every major site has these
+   - NORMAL/SAFE: Minified/bundled JavaScript â€” every production site minifies code
    - NORMAL/SAFE: Service workers for caching/PWA functionality
 
 Respond ONLY with valid JSON (no markdown, no code fences):
@@ -4832,11 +4832,11 @@ Respond ONLY with valid JSON (no markdown, no code fences):
 
 CRITICAL RULES:
 - A known legitimate site on its real domain = "safe". No exceptions.
-- Minified JS, hidden analytics iframes, CDN scripts are NORMAL — never flag them.
+- Minified JS, hidden analytics iframes, CDN scripts are NORMAL â€” never flag them.
 - "suspicious" means you found SPECIFIC concerning patterns, not vague doubts.
 - "dangerous" means you found ACTUAL drainer code signatures or clear phishing.
 - Empty risks array for safe sites. Do not invent risks that don't exist.
-- unpkg.com, cdnjs.cloudflare.com, jsdelivr.net are trusted CDNs — not suspicious sources.`;
+- unpkg.com, cdnjs.cloudflare.com, jsdelivr.net are trusted CDNs â€” not suspicious sources.`;
 
       const aiResponse = await runtime.quickLlm(aiPrompt);
 
@@ -4908,14 +4908,14 @@ CRITICAL RULES:
 
           const jupResp = await fetchTimeout(`https://token.jup.ag/${encodeURIComponent(tokenMint)}`);
           if (jupResp.ok) {
-            const tok = await jupResp.json();
+            const tok = await jupResp.json() as any;
 
             if (!tok.tags || tok.tags.length === 0) {
               warnings.push({ level: 'warning', message: `Token is not verified on Jupiter (no tags)` });
               riskScore += 15;
             }
           } else {
-            warnings.push({ level: 'warning', message: 'Token not found in Jupiter registry â€” could be very new or suspicious' });
+            warnings.push({ level: 'warning', message: 'Token not found in Jupiter registry Ã¢â‚¬â€ could be very new or suspicious' });
             riskScore += 20;
           }
         } catch {}
@@ -4930,11 +4930,11 @@ CRITICAL RULES:
             const parsed = (mintInfo.value.data as any)?.parsed?.info;
             if (parsed) {
               if (parsed.mintAuthority) {
-                warnings.push({ level: 'warning', message: 'Token has active mint authority â€” supply can be inflated' });
+                warnings.push({ level: 'warning', message: 'Token has active mint authority Ã¢â‚¬â€ supply can be inflated' });
                 riskScore += 15;
               }
               if (parsed.freezeAuthority) {
-                warnings.push({ level: 'danger', message: 'Token has freeze authority â€” your tokens can be frozen' });
+                warnings.push({ level: 'danger', message: 'Token has freeze authority Ã¢â‚¬â€ your tokens can be frozen' });
                 riskScore += 25;
               }
             }
@@ -4943,8 +4943,9 @@ CRITICAL RULES:
 
         try {
 
-                    const gmResp = await fetchTimeout(`https://gmgn.ai/defi/quotation/v1/tokens/sol/${encode(tokenMint)}`, {
+                    const gmResp = await fetch(`https://gmgn.ai/defi/quotation/v1/tokens/sol/${encode(tokenMint)}`, {
             headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', 'Referer': 'https://gmgn.ai/', 'Origin': 'https://gmgn.ai' },
+            signal: AbortSignal.timeout(5000),
           });
           if (gmResp.ok) {
             const gm = await gmResp.json() as any;
@@ -4974,7 +4975,7 @@ CRITICAL RULES:
                 riskScore += 30;
               }
               if (t.buy_tax > 5 || t.sell_tax > 5) {
-                warnings.push({ level: 'warning', message: `High tax detected — buy: ${t.buy_tax}%, sell: ${t.sell_tax}%` });
+                warnings.push({ level: 'warning', message: `High tax detected â€” buy: ${t.buy_tax}%, sell: ${t.sell_tax}%` });
                 riskScore += 15;
               }
             } else {
@@ -5174,7 +5175,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
         const errTxt = await swapResp.text().catch(() => '');
         throw new Error(`Swap API failed: ${swapResp.status} ${errTxt}`);
       }
-      const swapData = await swapResp.json();
+      const swapData = await swapResp.json() as any;
       const swapTxBase64 = swapData.swapTransaction;
       if (!swapTxBase64) throw new Error('No swap transaction returned');
 
@@ -5290,7 +5291,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
         const txt = await resp.text().catch(() => '');
         return res.status(resp.status).json({ error: `deBridge quote failed: ${resp.status}`, detail: txt });
       }
-      const data = await resp.json();
+      const data = await resp.json() as any;
 
 
       const est = data.estimation;
@@ -5332,7 +5333,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       `&prependOperatingExpenses=true`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return null;
-    const data = await resp.json();
+    const data = await resp.json() as any;
     const est = data.estimation;
     const dstOut = est?.dstChainTokenOut;
     const outAmount = dstOut ? Number(dstOut.recommendedAmount || dstOut.amount) / Math.pow(10, dstOut.decimals) : 0;
@@ -5362,7 +5363,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       `&fromAmount=${rawAmount}`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!resp.ok) return null;
-    const data = await resp.json();
+    const data = await resp.json() as any;
     const est = data.estimate;
     if (!est) return null;
     const outAmount = Number(est.toAmount || 0) / Math.pow(10, dstToken.decimals);
@@ -5401,7 +5402,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return null;
-    const data = await resp.json();
+    const data = await resp.json() as any;
     const route = data.result?.routes?.[0];
     if (!route) return null;
     const outAmount = Number(route.toAmount || 0) / Math.pow(10, dstToken.decimals);
@@ -5506,7 +5507,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
           const txt = await resp.text().catch(() => '');
           throw new Error(`deBridge create-tx failed: ${resp.status} ${txt.slice(0, 200)}`);
         }
-        const data = await resp.json();
+        const data = await resp.json() as any;
 
         return res.json({
           requiresEvmSign: true,
@@ -5529,7 +5530,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
         const txt = await resp.text().catch(() => '');
         throw new Error(`deBridge create-tx failed: ${resp.status} ${txt.slice(0, 200)}`);
       }
-      const data = await resp.json();
+      const data = await resp.json() as any;
       const txData = data.tx?.data;
       if (!txData) throw new Error('No transaction data returned from deBridge');
 
@@ -5556,7 +5557,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       const sig = await conn.sendRawTransaction(raw, { skipPreflight: false, preflightCommitment: 'confirmed' });
       await conn.confirmTransaction(sig, 'confirmed');
 
-      logger.info(`Bridge executed: ${sig} (${fromChain}/${fromToken} â†’ ${toChain}/${toToken}, deBridge)`);
+      logger.info(`Bridge executed: ${sig} (${fromChain}/${fromToken} Ã¢â€ â€™ ${toChain}/${toToken}, deBridge)`);
       _txCache.ts = 0;
       res.json({ txHash: sig, orderId: data.orderId || null });
     } catch (err: any) {
@@ -5701,6 +5702,44 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       _portfolioPnlCache.set(cacheKey, { data: localSummary, ts: Date.now() });
       return localSummary;
     }
+  }
+
+  async function fetchGmgnWalletActivity(address: string, opts: { limit: number; cursor: string; maxPages: number }) {
+    const { limit, cursor: initCursor, maxPages } = opts;
+    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Stockholm';
+    const tzOffset = -new Date().getTimezoneOffset() * 60;
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const appVer = `${datePart}-12279-c315e4d`;
+    const deviceId = '17d36dea-7b0f-41a5-b075-55e05ac80fed';
+    const fpDid = '658c1cb4de30106c298c464bd5273547';
+    const clientId = `gmgn_web_${appVer}`;
+    const params = new URLSearchParams({
+      device_id: deviceId, fp_did: fpDid, client_id: clientId,
+      from_app: 'gmgn', app_ver: appVer, tz_name: tzName,
+      tz_offset: String(tzOffset), app_lang: 'ru', os: 'web', worker: '0',
+    });
+    const baseUrl = `https://gmgn.ai/defi/quotation/v1/wallet/sol/wallet_activity/${address}?${params.toString()}`;
+    const { execSync } = await import('child_process');
+    const allActivities: any[] = [];
+    let next: string | null = null;
+    let cursor = initCursor;
+    for (let page = 1; page <= maxPages; page++) {
+      const pageUrl = cursor
+        ? `${baseUrl}&cursor=${encodeURIComponent(cursor)}&limit=${limit}`
+        : `${baseUrl}&limit=${limit}`;
+      const curlCmd = `curl.exe -s --max-time 12 "${pageUrl}" -H "Accept: application/json, text/plain, */*" -H "Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7" -H "Origin: https://gmgn.ai" -H "Referer: https://gmgn.ai/"`;
+      try {
+        const stdout = execSync(curlCmd, { encoding: 'utf-8', timeout: 18000 });
+        const payload = JSON.parse(stdout);
+        if (payload?.code !== 0 || !payload?.data) break;
+        const activities = payload.data.activities || [];
+        allActivities.push(...activities);
+        next = payload.data.next || null;
+        cursor = next || '';
+        if (!next || activities.length < limit) break;
+      } catch { break; }
+    }
+    return { activities: allActivities, next, total: allActivities.length };
   }
 
 
@@ -6173,17 +6212,17 @@ RULES:
 7. NEVER use eval, Function constructor, innerHTML with user input, or any dangerous patterns.
 
 Available API endpoints:
-- GET /api/status â€” { wallet, balance, session: {mode, status}, uptime, agents[], skills[] }
-- GET /api/stats/24h â€” { totalPnlSol, tradesExecuted, tradesWon, tradesLost, peakPnlSol, worstDrawdownSol }
-- GET /api/portfolio â€” { positions[], trades[] }
-- GET /api/events?limit=20 â€” recent events array
-- GET /api/skills â€” skills with tools array
+- GET /api/status Ã¢â‚¬â€ { wallet, balance, session: {mode, status}, uptime, agents[], skills[] }
+- GET /api/stats/24h Ã¢â‚¬â€ { totalPnlSol, tradesExecuted, tradesWon, tradesLost, peakPnlSol, worstDrawdownSol }
+- GET /api/portfolio Ã¢â‚¬â€ { positions[], trades[] }
+- GET /api/events?limit=20 Ã¢â‚¬â€ recent events array
+- GET /api/skills Ã¢â‚¬â€ skills with tools array
 
 Example response:
 {"title":"SOL Balance","html":"<div id=\\"wb\\"><span style=\\"color:var(--muted);font-size:.75rem\\">Balance</span><div id=\\"wbVal\\" style=\\"font-size:1.5rem;font-weight:800;color:var(--green)\\">...</div></div>","js":"function loadBal(){api('/api/status').then(function(s){document.getElementById('wbVal').textContent=(s.balance||0).toFixed(4)+' SOL'}).catch(function(){})}loadBal();","css":"","refreshInterval":30}`;
 
       const aiMsg = `Generate a dashboard widget: ${prompt}`;
-      const response = await runtime.chat('commander', `[SYSTEM INSTRUCTION â€” you are a widget code generator, respond ONLY with raw JSON, no markdown]\n\n${systemPrompt}\n\nUser request: ${aiMsg}`);
+      const response = await runtime.chat('commander', `[SYSTEM INSTRUCTION Ã¢â‚¬â€ you are a widget code generator, respond ONLY with raw JSON, no markdown]\n\n${systemPrompt}\n\nUser request: ${aiMsg}`);
 
 
       let widget;
@@ -6750,10 +6789,10 @@ Example response:
         'Your ONLY job: expand it into a well-structured system prompt while STRICTLY preserving the user\'s original intent.',
         '',
         'CRITICAL RULES:',
-        '- DO NOT change the topic or shift focus. If user says "analyze blockchain transactions" â€” the result must be about analyzing blockchain transactions, NOT about trading memecoins.',
+        '- DO NOT change the topic or shift focus. If user says "analyze blockchain transactions" Ã¢â‚¬â€ the result must be about analyzing blockchain transactions, NOT about trading memecoins.',
         '- DO NOT add capabilities the user did not ask for. Only expand on what they actually wrote.',
         '- DO NOT assume the agent is a trading bot unless the user explicitly says so.',
-        '- Preserve the user\'s language (Russian prompt â†’ Russian output, English â†’ English).',
+        '- Preserve the user\'s language (Russian prompt Ã¢â€ â€™ Russian output, English Ã¢â€ â€™ English).',
         '- Add clear structure: identity, core task, how to approach the task, response format, rules.',
         '- Keep it focused and concise (max 500 words). Quality over quantity.',
         '- Output ONLY the optimized prompt text. No explanations, no markdown code fences, no preamble.',
@@ -7351,7 +7390,7 @@ Example response:
           {
             id: 'copilot-github-oauth',
             title: 'Connect GitHub Account',
-            description: 'Copilot works through GitHub. Click the Connect button below â€” an authorization window will open. Enter the code on the GitHub page and confirm. Status will update automatically after connecting.',
+            description: 'Copilot works through GitHub. Click the Connect button below Ã¢â‚¬â€ an authorization window will open. Enter the code on the GitHub page and confirm. Status will update automatically after connecting.',
             blocking: true,
             actions: [],
           },
@@ -7364,7 +7403,7 @@ Example response:
           },
           {
             id: 'copilot-reload-check',
-            title: 'Done â€” Test It Out',
+            title: 'Done Ã¢â‚¬â€ Test It Out',
             description: 'Setup complete! Click Finish, go to AI Chat and send a test message.',
             blocking: false,
             actions: [],
@@ -7385,18 +7424,18 @@ Example response:
       const envKey = provider === 'google-oauth' ? 'OAUTH_GOOGLE_CLIENT_ID' : 'OAUTH_AZURE_CLIENT_ID';
       const clientIdReady = !!(process.env[envKey] || '').trim();
       const oauthDesc = clientIdReady
-        ? `Click the Connect button below â€” a ${oauthProvider === 'google' ? 'Google' : 'Azure'} authorization window will open. Confirm access. Status will update automatically after connecting.`
+        ? `Click the Connect button below Ã¢â‚¬â€ a ${oauthProvider === 'google' ? 'Google' : 'Azure'} authorization window will open. Confirm access. Status will update automatically after connecting.`
         : oauthProvider === 'google'
-          ? `âš  Google OAuth requires a Client ID on the server. Set ${envKey} in your .env file and restart, OR switch to the "google" provider (API Key mode) â€” just set GOOGLE_API_KEY in Settings â†’ API Keys. That is much simpler and works right away.`
-          : `âš  Azure OAuth requires a Client ID on the server. Set ${envKey} in your .env file and restart.`;
+          ? `Ã¢Å¡Â  Google OAuth requires a Client ID on the server. Set ${envKey} in your .env file and restart, OR switch to the "google" provider (API Key mode) Ã¢â‚¬â€ just set GOOGLE_API_KEY in Settings Ã¢â€ â€™ API Keys. That is much simpler and works right away.`
+          : `Ã¢Å¡Â  Azure OAuth requires a Client ID on the server. Set ${envKey} in your .env file and restart.`;
       return {
         provider,
         title: `${provider} Setup`,
         summary: clientIdReady
-          ? 'This provider works via OAuth â€” no API key needed.'
+          ? 'This provider works via OAuth Ã¢â‚¬â€ no API key needed.'
           : oauthProvider === 'google'
-            ? 'âš  OAuth Client ID not configured. Use GOOGLE_API_KEY instead (simpler) or set up the OAuth client.'
-            : 'âš  OAuth Client ID not configured. Set OAUTH_AZURE_CLIENT_ID in .env and restart.',
+            ? 'Ã¢Å¡Â  OAuth Client ID not configured. Use GOOGLE_API_KEY instead (simpler) or set up the OAuth client.'
+            : 'Ã¢Å¡Â  OAuth Client ID not configured. Set OAUTH_AZURE_CLIENT_ID in .env and restart.',
         steps: [
           {
             id: `${provider}-oauth`,
@@ -7414,7 +7453,7 @@ Example response:
           },
           {
             id: `${provider}-reload-check`,
-            title: 'Done â€” Test It Out',
+            title: 'Done Ã¢â‚¬â€ Test It Out',
             description: 'Setup complete! Click Finish, go to AI Chat and send a test message.',
             blocking: false,
             actions: [],
@@ -7456,7 +7495,7 @@ Example response:
         },
         {
           id: `${provider}-reload-check`,
-          title: 'Done â€” Test It Out',
+          title: 'Done Ã¢â‚¬â€ Test It Out',
           description: 'Setup complete! Click Finish, go to AI Chat and send a test message.',
           blocking: false,
           actions: [],
@@ -7832,7 +7871,7 @@ Example response:
           return result;
         }
       } catch (e) {
-        logger.warn('[Tweet] Provider', idx, 'failed for', tweetId, (e as any).message);
+        logger.warn(`[Tweet] Provider ${idx} failed for ${tweetId}: ${(e as any).message}`);
       }
     }
 
@@ -7914,7 +7953,7 @@ Example response:
     try {
       const browser = runtime.getBrowser();
       const ok = await browser.extractMainBrowserTwitterCookies();
-      res.json({ success: ok, message: ok ? 'Cookies extracted' : 'No Twitter cookies found â€” are you logged in on x.com?' });
+      res.json({ success: ok, message: ok ? 'Cookies extracted' : 'No Twitter cookies found Ã¢â‚¬â€ are you logged in on x.com?' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -8067,7 +8106,7 @@ Example response:
       }
       const browser = runtime.getBrowser();
       if (!browser.getStatus().axiomConnected) {
-        return res.status(400).json({ error: 'Axiom not connected. Connect via Settings → Browser first.' });
+        return res.status(400).json({ error: 'Axiom not connected. Connect via Settings â†’ Browser first.' });
       }
 
 
@@ -8300,12 +8339,12 @@ if errorlevel 1 (\r
 )\r
 \r
 chcp 65001 >nul\r
-title WhiteOwl â€” Chrome Extension Installer\r
+title WhiteOwl Ã¢â‚¬â€ Chrome Extension Installer\r
 color 0A\r
 echo.\r
-echo  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\r
-echo    WhiteOwl â€” Auto-install Chrome Extension\r
-echo  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\r
+echo  Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\r
+echo    WhiteOwl Ã¢â‚¬â€ Auto-install Chrome Extension\r
+echo  Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\r
 echo.\r
 \r
 set "WhiteOwl_URL=${origin}"\r
@@ -8333,21 +8372,21 @@ echo  Saved to: %EXT_DIR%\r
 \r
 echo  [3/4] Setting browser policies (HKLM + HKCU + External)...\r
 \r
-:: â”€â”€ Force-install via HKLM policy (most reliable on unmanaged Windows) â”€â”€\r
+:: Ã¢â€â‚¬Ã¢â€â‚¬ Force-install via HKLM policy (most reliable on unmanaged Windows) Ã¢â€â‚¬Ã¢â€â‚¬\r
 reg add "HKLM\\SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 reg add "HKLM\\SOFTWARE\\Policies\\BraveSoftware\\Brave\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 \r
-:: â”€â”€ Force-install via HKCU policy (backup) â”€â”€\r
+:: Ã¢â€â‚¬Ã¢â€â‚¬ Force-install via HKCU policy (backup) Ã¢â€â‚¬Ã¢â€â‚¬\r
 reg add "HKCU\\SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 reg add "HKCU\\SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 reg add "HKCU\\SOFTWARE\\Policies\\BraveSoftware\\Brave\\ExtensionInstallForcelist" /v 1 /t REG_SZ /d "%EXT_ID%;%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 \r
-:: â”€â”€ Allow localhost as extension install source â”€â”€\r
+:: Ã¢â€â‚¬Ã¢â€â‚¬ Allow localhost as extension install source Ã¢â€â‚¬Ã¢â€â‚¬\r
 reg add "HKLM\\SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallSources" /v 1 /t REG_SZ /d "http://localhost:*/*" /f >nul 2>&1\r
 reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionInstallSources" /v 1 /t REG_SZ /d "http://localhost:*/*" /f >nul 2>&1\r
 \r
-:: â”€â”€ External Extensions registry (alternative install method) â”€â”€\r
+:: Ã¢â€â‚¬Ã¢â€â‚¬ External Extensions registry (alternative install method) Ã¢â€â‚¬Ã¢â€â‚¬\r
 reg add "HKLM\\SOFTWARE\\Google\\Chrome\\Extensions\\%EXT_ID%" /v update_url /t REG_SZ /d "%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 reg add "HKLM\\SOFTWARE\\WOW6432Node\\Google\\Chrome\\Extensions\\%EXT_ID%" /v update_url /t REG_SZ /d "%WhiteOwl_URL%/extension/update.xml" /f >nul 2>&1\r
 \r
@@ -8907,7 +8946,7 @@ async function autoInitEmptyGitHubRepos(ghToken: string, logger: LoggerInterface
           return;
         }
       }
-      logger.warn(`Failed to initialize ${repo.full_name} â€” may need repo scope`);
+      logger.warn(`Failed to initialize ${repo.full_name} Ã¢â‚¬â€ may need repo scope`);
     }
   } catch (err: any) {
     logger.warn(`Auto-init repos failed: ${err.message}`);

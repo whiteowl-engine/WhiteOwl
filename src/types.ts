@@ -283,15 +283,15 @@ export interface EventMap {
   'session:report': { sessionId: string; report: string; stats: SessionStats };
 
   'agent:thinking': { agentId: string; context: string };
-  'agent:decided': { agentId: string; action: string; reason: string };
+  'agent:decided': { agentId: string; action: string; reason: string; fullReason?: string };
   'agent:error': { agentId: string; error: string };
   'agent:tool_call': { agentId: string; tool: string; params: Record<string, any>; round: number };
-  'agent:tool_result': { agentId: string; tool: string; result: any; durationMs: number };
-  'agent:llm_response': { agentId: string; content: string; toolCallsCount: number; round: number; usage?: { promptTokens: number; completionTokens: number } };
+  'agent:tool_result': { agentId: string; tool: string; result: any; durationMs: number; fullResult?: string };
+  'agent:llm_response': { agentId: string; content: string; toolCallsCount: number; round: number; usage?: { promptTokens: number; completionTokens: number }; fullContent?: string };
   'agent:chat_request': { agentId: string; message: string };
   'agent:token': { agentId: string; token: string; final?: boolean };
   'agent:file_change': { agentId: string; path: string; diff: string; tool: string };
-  'agent:cycle_usage': { agentId: string; promptTokens: number; completionTokens: number; totalTokens: number };
+  'agent:cycle_usage': { agentId: string; promptTokens: number; completionTokens: number; totalTokens: number; contextWindowTokens?: number };
 
   'system:ready': { timestamp: number };
   'system:health': { uptime: number; agents: AgentState[]; positions: Position[] };
