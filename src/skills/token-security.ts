@@ -455,7 +455,7 @@ async quickCheck(mint: string): Promise<{ score: number; flags: string[] }> {
         graduated: true,
         locked: false,
         durationDays: 0,
-        platform: dexPair.dexId,
+        platform: t.launchpad || null,
       };
     } catch {
       return { graduated: false, locked: false, durationDays: 0, platform: null };

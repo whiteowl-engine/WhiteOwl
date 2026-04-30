@@ -159,7 +159,7 @@ export class AnnouncementSniperSkill implements Skill {
           },
           required: ['id'],
         },
-        riskLevel: 'high',
+        riskLevel: 'financial',
       },
       {
         name: 'announcement_pattern_add',

@@ -293,7 +293,7 @@ export class ShitTraderSkill implements Skill {
   private logger!: LoggerInterface;
   private eventBus!: EventBusInterface;
   private wallet!: WalletInterface;
-  private pumpSdk!: OnlinePumpSdk;
+  private pumpSdk!: any;
   private connection!: Connection;
   private pumpGlobal: Global | null = null;
   private pumpFeeConfig: FeeConfig | null = null;
@@ -325,7 +325,7 @@ export class ShitTraderSkill implements Skill {
     this.pumpGlobal = await this.pumpSdk.fetchGlobal();
     try { this.pumpFeeConfig = await this.pumpSdk.fetchFeeConfig(); } catch { this.pumpFeeConfig = null; }
     this.globalCacheTime = now;
-    return { global: this.pumpGlobal, feeConfig: this.pumpFeeConfig };
+    return { global: this.pumpGlobal!, feeConfig: this.pumpFeeConfig };
   }
 
   async execute(tool: string, params: Record<string, any>): Promise<any> {

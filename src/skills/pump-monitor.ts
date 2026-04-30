@@ -560,7 +560,7 @@ export class PumpMonitorSkill implements Skill {
   private eventBus!: EventBusInterface;
   private logger!: LoggerInterface;
   private ctx!: SkillContext;
-  private pumpSdk!: OnlinePumpSdk;
+  private pumpSdk!: any;
   private filters: { requireSocials?: boolean; nameBlacklist?: RegExp[] } = {};
   private stats = { tokensReceived: 0, tokensEmitted: 0, tokensFiltered: 0, tradeEventsReceived: 0 };
 

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { ExchangeClient, HttpTransport, InfoClient } from '@nktkas/hyperliquid';
+// @ts-ignore - subpath export requires bundler moduleResolution
 import { formatPrice, formatSize, SymbolConverter } from '@nktkas/hyperliquid/utils';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
@@ -113,7 +114,7 @@ export class HyperliquidPerpSkill implements Skill {
           },
           required: ['coin', 'side'],
         },
-        riskLevel: 'high',
+        riskLevel: 'financial',
       },
       {
         name: 'hl_close',
@@ -168,7 +169,7 @@ export class HyperliquidPerpSkill implements Skill {
       case 'hl_mark_price':
         return await this.getMarkPrice(params.coin);
       case 'hl_open':
-        return await this.openPosition(params);
+        return await this.openPosition(params as any);
       case 'hl_close':
         return await this.closePosition(params.id);
       case 'hl_positions':

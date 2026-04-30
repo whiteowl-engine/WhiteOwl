@@ -99,6 +99,10 @@ export class TrendContext {
     return this.getSnapshot().xTrackerMints.includes(mint);
   }
 
+  getActiveNarratives(): Array<{ keywords: string[]; title: string }> {
+    return this.getSnapshot().events.map(e => ({ keywords: e.keywords, title: e.event }));
+  }
+
 scoreNarrativeMatch(name: string, description?: string): number {
     const snapshot = this.getSnapshot();
     if (snapshot.events.length === 0) return 0;
@@ -251,7 +255,7 @@ scoreNarrativeMatch(name: string, description?: string): number {
 
   private async fetchXTrackerData(): Promise<Array<{ analysis: string; relatedAnalysis: string; tokens: string[] }>> {
     try {
-      const res = await fetch(`http://localhost:${port}/api/twitter/feed?limit=200`);
+      const res = await fetch(`http://localhost:${API_PORT}/api/twitter/feed?limit=200`);
       if (!res.ok) return [];
       const json = await res.json() as any;
       const items = Array.isArray(json.items) ? json.items : [];

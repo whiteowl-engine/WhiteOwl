@@ -426,13 +426,13 @@ export class Runtime {
             ? getLLMProviderWithFallback([firstAgent.model, ...firstAgent.fallbackModels])
             : getLLMProvider(firstAgent.model);
           sniperJob.setLLMFunction(async (messages, _tools) => {
-            const resp = await sniperLLM.chat(messages, { max_tokens: 200 });
+            const resp = await sniperLLM.chat(messages, undefined, { maxTokens: 200 });
             return resp;
           });
 
 
           trendContext.setLLMFunction(async (messages) => {
-            return sniperLLM.chat(messages, { max_tokens: 800 });
+            return sniperLLM.chat(messages, undefined, { maxTokens: 800 });
           });
         }
 

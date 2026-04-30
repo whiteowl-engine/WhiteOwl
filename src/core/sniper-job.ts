@@ -626,7 +626,7 @@ private serializeTrackedPosition(tracker: SniperPositionTracker): {
     };
   }
 
-  getStats(): SniperStats & { trackedPositions?: any[] } {
+  getStats(): SniperStats & { trackedPositions?: any[]; paperMode?: boolean; paperBalance?: number; paperStats?: any } {
     const positions = [...this.openPositions.values()].map((tracker) => this.serializeTrackedPosition(tracker));
     return {
       ...this.stats,
@@ -1573,7 +1573,7 @@ getTokenOverlay(): Array<{
           decision = parseSniperDecision(text);
           think.lines.push({
             icon: decision.action === 'buy' ? '🟢' : decision.action === 'sell' ? '🔴' : '⏸️',
-            text: `LLM decided: ${decision.action.toUpperCase()}${decision.reason ? ' — ' + decision.reason : ''}`,
+            text: `LLM decided: ${decision.action.toUpperCase()}${(decision as any).reason ? ' — ' + (decision as any).reason : ''}`,
             color: decision.action === 'buy' ? 'green' : decision.action === 'sell' ? 'red' : undefined,
           });
 

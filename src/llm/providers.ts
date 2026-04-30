@@ -1260,9 +1260,9 @@ private formatMessages(messages: LLMMessage[]): any[] {
           content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''),
           tool_calls: m.toolCalls.map(tc => {
 
-            let args = tc.function.arguments;
+            let args: any = tc.function.arguments;
             if (typeof args === 'string') {
-              try { args = JSON.parse(args); } catch { args = {}; }
+              try { args = JSON.parse(args); } catch { /* keep original string */ }
             }
             return {
               id: sanitizeToolId(tc.id),

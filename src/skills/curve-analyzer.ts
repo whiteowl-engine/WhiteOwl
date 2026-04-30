@@ -149,7 +149,7 @@ export class CurveAnalyzerSkill implements Skill {
   private logger!: LoggerInterface;
   private memory!: MemoryInterface;
   private solanaRpc = '';
-  private pumpSdk!: OnlinePumpSdk;
+  private pumpSdk!: any;
 
   private trackers = new Map<string, CurveTracker>();
   private autoWatch = false;

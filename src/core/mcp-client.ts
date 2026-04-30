@@ -313,6 +313,7 @@ export class MCPSkill implements Skill {
   manifest: SkillManifest;
   private transport: Transport;
   private serverConfig: MCPServerConfig;
+  config: MCPServerConfig;
   private logger: LoggerInterface;
 
   constructor(config: MCPServerConfig, logger: LoggerInterface) {

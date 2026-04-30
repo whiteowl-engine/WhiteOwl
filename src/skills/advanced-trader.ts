@@ -637,7 +637,7 @@ export class AdvancedTraderSkill implements Skill {
 
     try {
       const res = await fetch(
-        `https://api.jup.ag/swap/v1/quote?inputMint=${tokenIn}&outputMint=${tokenOut}&amount=${amountIn}&slippageBps=50`,
+        `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=50`,
         { signal: AbortSignal.timeout(5_000) }
       );
       if (res.ok) {
