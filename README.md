@@ -43,6 +43,10 @@
 | **Perp Desk** | Native Hyperliquid perp surface with funding, marks, live or paper positions, and encrypted API settings |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
 
+## Panel 1.0.7 Patch
+
+WhiteOwl 1.0.7 fixes the TypeScript release build for the ESM runtime: `.ts` source imports now compile cleanly, `import.meta` is supported during `npm run build`, and the package lock version is back in sync with the release version.
+
 ## Panel 1.0.5 Update
 
 WhiteOwl 1.0.5 adds native dashboard surfaces for **Announce Sniper** and **HL Perps**. Announce Sniper watches GMGN Twitter/news events for high-impact token announcements, sanitizes noisy social/HTML text, scores long/short patterns, supports manual approval, and can feed announcement-aware risk and sniper sizing. HL Perps adds a Hyperliquid adapter with live and paper execution, signed live order routing, marks, funding, announcement-driven shorts, and encrypted Hyperliquid API settings in `Settings -> API Keys`.

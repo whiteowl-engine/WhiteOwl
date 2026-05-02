@@ -929,7 +929,7 @@ async ensureAgents(): Promise<boolean> {
 
     try {
 
-      const { loadConfig } = await import('./config');
+      const { loadConfig } = await import('./config.ts');
       const freshConfig = loadConfig();
 
       if (freshConfig.agents.length === 0) return false;

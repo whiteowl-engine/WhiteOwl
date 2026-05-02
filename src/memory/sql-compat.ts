@@ -153,5 +153,5 @@ export default Database;
 (Database as any).Database = Database;
 
 export namespace Database {
-  export type Database = InstanceType<typeof import('./sql-compat').Database>;
+  export type Database = InstanceType<typeof import('./sql-compat.ts').Database>;
 }
