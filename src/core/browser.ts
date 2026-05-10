@@ -1031,12 +1031,30 @@ async detectMainBrowser(): Promise<{ available: boolean; browser?: string; wsEnd
         const wsPath = lines[1].trim();
         if (!port || !wsPath.startsWith('/devtools/browser/')) continue;
 
-        const httpOk = await fetch(`http://${host}:${port}/json/version`, {
-          signal: AbortSignal.timeout(1500),
-        }).then(r => r.ok).catch(() => false);
-        if (httpOk) {
-          const wsEndpoint = `ws://${host}:${port}${wsPath}`;
+        let liveWsEndpoint: string | null = null;
+        try {
+          const resp = await fetch(`http://${host}:${port}/json/version`, {
+            signal: AbortSignal.timeout(1500),
+          });
+          if (resp.ok) {
+            const info = await resp.json() as any;
+            if (info && typeof info.webSocketDebuggerUrl === 'string' && info.webSocketDebuggerUrl) {
+              liveWsEndpoint = info.webSocketDebuggerUrl;
+            }
+          }
+        } catch {  }
+
+        if (liveWsEndpoint) {
           this.logger.info(`[Browser] CDP auto-detected via DevToolsActivePort: ${name} on port ${port}`);
+          return { available: true, browser: name, wsEndpoint: liveWsEndpoint };
+        }
+        // Fallback: trust the file-derived path only if we cannot reach /json/version (older Chromium builds)
+        const httpReachable = await fetch(`http://${host}:${port}/json/version`, {
+          signal: AbortSignal.timeout(1500),
+        }).then(r => r.status > 0).catch(() => false);
+        if (httpReachable) {
+          const wsEndpoint = `ws://${host}:${port}${wsPath}`;
+          this.logger.info(`[Browser] CDP auto-detected via DevToolsActivePort (file path): ${name} on port ${port}`);
           return { available: true, browser: name, wsEndpoint };
         }
         this.logger.debug(`[Browser] DevToolsActivePort found for ${name} (port ${port}) but HTTP /json/version not available`);
