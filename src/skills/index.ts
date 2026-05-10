@@ -29,6 +29,7 @@ import { NewsSearchSkill } from './news-search.ts';
 import { AxiomApiSkill } from './axiom-api.ts';
 import { AnnouncementSniperSkill } from './announcement-sniper.ts';
 import { HyperliquidPerpSkill } from './hyperliquid-perp.ts';
+import { PredictionPulseSkill } from './prediction-pulse.ts';
 import { Skill } from '../types.ts';
 
 export function getAllSkills(): Skill[] {
@@ -64,6 +65,7 @@ export function getAllSkills(): Skill[] {
     new AxiomApiSkill(),
     new AnnouncementSniperSkill(),
     new HyperliquidPerpSkill(),
+    new PredictionPulseSkill(),
   ];
 }
 
@@ -95,4 +97,6 @@ export {
   TerminalSkill,
   AxiomApiSkill,
   AnnouncementSniperSkill,
+  HyperliquidPerpSkill,
+  PredictionPulseSkill,
 };
