@@ -129,7 +129,8 @@ function buildDefaultAgents(): AgentConfig[] {
   const oauthManager = getOAuthManager();
   const hasOAuth = oauthManager?.hasToken('github')
     || oauthManager?.hasToken('google')
-    || oauthManager?.hasToken('azure');
+    || oauthManager?.hasToken('azure')
+    || oauthManager?.hasToken('kiro');
   const hasLLM = env('OPENAI_API_KEY') || env('ANTHROPIC_API_KEY') || env('OLLAMA_BASE_URL')
     || env('GROQ_API_KEY') || env('DEEPSEEK_API_KEY') || env('OPENROUTER_API_KEY')
     || env('MISTRAL_API_KEY') || env('GOOGLE_API_KEY') || env('XAI_API_KEY')
@@ -803,6 +804,23 @@ export function getAvailableModels(): Array<{ provider: string; model: string; l
       { provider: 'azure-oauth', model: 'gpt-4o-mini', label: 'GPT-4o Mini (Azure)', tier: 'fast', cost: 'FREE' },
       { provider: 'azure-oauth', model: 'gpt-4.1', label: 'GPT-4.1 (Azure)', tier: 'smart', cost: 'FREE' },
       { provider: 'azure-oauth', model: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Azure)', tier: 'fast', cost: 'FREE' },
+    );
+  }
+  if (oauthMgr?.hasToken('kiro')) {
+    models.push(
+      { provider: 'kiro-oauth', model: 'claude-opus-4.7', label: 'Claude Opus 4.7 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'claude-haiku-4.5', label: 'Claude Haiku 4.5 (Kiro OAuth)', tier: 'fast', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gpt-5.4', label: 'GPT-5.4 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gpt-5-mini', label: 'GPT-5 Mini (Kiro OAuth)', tier: 'fast', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gpt-4.1', label: 'GPT-4.1 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Kiro OAuth)', tier: 'fast', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Kiro OAuth)', tier: 'fast', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'grok-3', label: 'Grok 3 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'deepseek-v3.2', label: 'DeepSeek V3.2 (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'qwen3-coder-next', label: 'Qwen3-Coder-Next (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
+      { provider: 'kiro-oauth', model: 'llama-3.3-70b', label: 'Llama 3.3 70B (Kiro OAuth)', tier: 'smart', cost: 'OAUTH' },
     );
   }
 

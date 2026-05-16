@@ -3192,6 +3192,8 @@ cd WhiteOwl-Extension</pre>
                 <div class="api-key-row"><label>Fireworks</label><input type="password" id="key_fireworks" placeholder="..." autocomplete="off"></div>
                 <div class="api-key-row"><label>SambaNova</label><input type="password" id="key_sambanova" placeholder="..." autocomplete="off"></div>
                 <div class="api-key-row"><label>Ollama URL</label><input type="text" id="key_ollama" placeholder="http://localhost:11434" autocomplete="off"></div>
+                <div class="api-key-row"><label>Kiro API Key</label><input type="password" id="key_kiro" placeholder="kiro_..." autocomplete="off"></div>
+                <div class="api-key-row"><label>Kiro Base URL</label><input type="text" id="key_kiro_base_url" placeholder="https://api.kiro.dev/v1 (optional self-hosted)" autocomplete="off"></div>
                 <div style="height:1px;background:var(--border);margin:4px 0"></div>
                 <div style="font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em">Hyperliquid</div>
                 <div class="api-key-row" data-always-visible="true"><label>HL API URL</label><input type="text" id="key_hyperliquid_api_url" placeholder="https://api.hyperliquid.xyz/info" autocomplete="off"></div>
@@ -10846,7 +10848,7 @@ function loadSetupWizard(force) {
 
 var SETUP_ONBOARD_DONE_KEY = 'WhiteOwl_setup_onboard_done_v1';
 var SETUP_PROFILE_KEY = 'WhiteOwl_setup_profile_v1';
-var DEFAULT_SETUP_PROVIDERS = ['copilot','google-oauth','azure-oauth','openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama'];
+var DEFAULT_SETUP_PROVIDERS = ['copilot','google-oauth','azure-oauth','kiro-oauth','openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama','kiro'];
 var setupOnboardState = { provider: '', providerOverride: '', providers: [], guide: null, status: {}, step: 0, open: false };
 var setupReconfigureMode = false;
 
@@ -10857,6 +10859,7 @@ function getProviderScope(provider) {
   if (p === 'copilot') return { oauth: ['github'], api: [], modelProviders: ['copilot'] };
   if (p === 'google-oauth') return { oauth: ['google'], api: [], modelProviders: ['google-oauth'] };
   if (p === 'azure-oauth') return { oauth: ['azure'], api: [], modelProviders: ['azure-oauth'] };
+  if (p === 'kiro-oauth') return { oauth: ['kiro'], api: [], modelProviders: ['kiro-oauth'] };
   return { oauth: [], api: [p], modelProviders: [p] };
 }
 
@@ -11415,7 +11418,8 @@ function loadOAuth() {
     var providers = [
       { id: 'github', name: 'GitHub Copilot', desc: 'GPT-4o free via Copilot subscription', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>' },
       { id: 'google', name: 'Google Cloud', desc: 'Gemini via OAuth (needs OAUTH_GOOGLE_CLIENT_ID on server) — or use Google API key in API Keys', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 110-14h.5"/><path d="M22 18l-5-3v6l5-3z"/></svg>' },
-      { id: 'azure', name: 'Azure AD', desc: 'Azure OpenAI via OAuth (needs OAUTH_AZURE_CLIENT_ID on server)', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 12h10M12 7v10"/></svg>' }
+      { id: 'azure', name: 'Azure AD', desc: 'Azure OpenAI via OAuth (needs OAUTH_AZURE_CLIENT_ID on server)', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 12h10M12 7v10"/></svg>' },
+      { id: 'kiro', name: 'Kiro', desc: 'Kiro AI aggregator via OAuth device flow (needs OAUTH_KIRO_CLIENT_ID on server) — or use KIRO_API_KEY in API Keys', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>' }
     ];
     $('#oauthRows').innerHTML = providers.map(function(p) {
       var connected = status[p.id];
@@ -11443,7 +11447,7 @@ function loadOAuth() {
 }
 
 function connectOAuth(provider) {
-  if (provider === 'google' || provider === 'azure') {
+  if (provider === 'google' || provider === 'azure' || provider === 'kiro') {
     _checkCapsThen(provider, function() {
       _doOAuthFlow(provider, function() { api('/api/agents/reload', 'POST').then(function() { initChat(); }).catch(function(){}); loadSetupWizard(true); loadSetupOnboardingData(); });
     });
@@ -11530,7 +11534,7 @@ function saveModelConfig() {
   });
 }
 
-var API_KEY_PROVIDERS = ['openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama','hyperliquid_api_url','hyperliquid_account_address','hyperliquid_api_wallet_address','hyperliquid_private_key'];
+var API_KEY_PROVIDERS = ['openai','anthropic','google','groq','deepseek','mistral','openrouter','xai','cerebras','together','fireworks','sambanova','ollama','kiro','kiro_base_url','hyperliquid_api_url','hyperliquid_account_address','hyperliquid_api_wallet_address','hyperliquid_private_key'];
 
 function loadApiKeys() {
   api('/api/keys/config').then(function(data) {

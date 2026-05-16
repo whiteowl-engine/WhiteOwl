@@ -71,7 +71,8 @@ export type LLMProviderName =
   | 'copilot'
   | 'google-oauth'
   | 'azure-oauth'
-  | 'kiro';
+  | 'kiro'
+  | 'kiro-oauth';
 
 export interface ModelConfig {
   provider: LLMProviderName;

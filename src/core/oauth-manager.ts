@@ -57,6 +57,19 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     scopes: ['https://cognitiveservices.azure.com/.default'],
     tokenEndpointAuth: 'body',
   },
+
+  // Kiro AI aggregator. Uses an OAuth 2.0 device-flow endpoint so the panel
+  // can connect to Kiro without a long-lived API key — same pattern as
+  // GitHub/Google/Azure. Endpoints + clientId are env-configurable so
+  // self-hosted or alternative Kiro deployments slot in cleanly.
+  kiro: {
+    name: 'Kiro',
+    clientId: process.env.OAUTH_KIRO_CLIENT_ID || '',
+    deviceAuthUrl: process.env.OAUTH_KIRO_DEVICE_URL || 'https://auth.kiro.dev/oauth/device/code',
+    tokenUrl: process.env.OAUTH_KIRO_TOKEN_URL || 'https://auth.kiro.dev/oauth/token',
+    scopes: (process.env.OAUTH_KIRO_SCOPES || 'kiro:models:invoke kiro:models:list').split(/\s+/).filter(Boolean),
+    tokenEndpointAuth: 'body',
+  },
 };
 
 export class OAuthManager {

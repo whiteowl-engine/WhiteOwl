@@ -7373,11 +7373,11 @@ Example response:
     commonErrors: Array<{ pattern: string; explanation: string; fix: string }>;
   }
 
-  const OAUTH_PROVIDERS = new Set(['github', 'google', 'azure']);
+  const OAUTH_PROVIDERS = new Set(['github', 'google', 'azure', 'kiro']);
   const API_KEY_ONLY_PROVIDERS = new Set([
     'openai', 'anthropic', 'google', 'groq', 'deepseek', 'mistral',
     'openrouter', 'xai', 'cerebras', 'together', 'fireworks', 'sambanova',
-    'ollama',
+    'ollama', 'kiro',
   ]);
 
   const buildProviderGuide = (provider: string): SetupGuide => {
@@ -7414,6 +7414,51 @@ Example response:
             pattern: '401|403|copilot subscription',
             explanation: 'No active Copilot subscription or token is invalid.',
             fix: 'Reconnect GitHub OAuth and verify your Copilot subscription is active.',
+          },
+        ],
+      };
+    }
+
+    if (provider === 'kiro-oauth') {
+      const envKey = 'OAUTH_KIRO_CLIENT_ID';
+      const clientIdReady = !!(process.env[envKey] || '').trim();
+      const oauthDesc = clientIdReady
+        ? `Click the Connect button below — a Kiro authorization window will open. Confirm access. Status will update automatically after connecting.`
+        : `⚠ Kiro OAuth requires ${envKey} (and optionally OAUTH_KIRO_DEVICE_URL / OAUTH_KIRO_TOKEN_URL / OAUTH_KIRO_SCOPES) in .env. Alternatively, use the "kiro" provider (API Key mode) by setting KIRO_API_KEY in Settings → API Keys.`;
+      return {
+        provider,
+        title: 'Kiro OAuth Setup',
+        summary: clientIdReady
+          ? 'Kiro works via OAuth — no API key needed once connected.'
+          : '⚠ Kiro OAuth Client ID not configured. Use KIRO_API_KEY (simpler) or set OAUTH_KIRO_CLIENT_ID in .env.',
+        steps: [
+          {
+            id: 'kiro-oauth-oauth',
+            title: 'Connect Kiro Account',
+            description: oauthDesc,
+            blocking: clientIdReady,
+            actions: [],
+          },
+          {
+            id: 'kiro-oauth-model-selected',
+            title: 'Choose Kiro Model',
+            description: 'Pick a Kiro-routed model from the list below and click Apply model.',
+            blocking: true,
+            actions: [],
+          },
+          {
+            id: 'kiro-oauth-reload-check',
+            title: 'Done — Test It Out',
+            description: 'Setup complete! Click Finish, go to AI Chat and send a test message.',
+            blocking: false,
+            actions: [],
+          },
+        ],
+        commonErrors: [
+          {
+            pattern: '401|unauthorized|invalid_grant',
+            explanation: 'OAuth token expired or revoked.',
+            fix: 'Disconnect + Connect again in OAuth / Free AI.',
           },
         ],
       };
@@ -7518,6 +7563,7 @@ Example response:
     const githubConnected = oauthManager.hasToken('github');
     const googleConnected = oauthManager.hasToken('google');
     const azureConnected = oauthManager.hasToken('azure');
+    const kiroConnected = oauthManager.hasToken('kiro');
     const current = runtime.getModelConfig();
     const commander = current.commander;
     const selectedProvider = commander?.provider || '';
@@ -7573,6 +7619,22 @@ Example response:
       return status;
     }
 
+    if (provider === 'kiro-oauth') {
+      status['kiro-oauth-model-selected'] = {
+        done: selectedMatches,
+        detail: selectedMatches ? 'Kiro OAuth model selected.' : 'A different model is currently active.',
+      };
+      status['kiro-oauth-oauth'] = {
+        done: kiroConnected,
+        detail: kiroConnected ? 'Kiro OAuth connected.' : 'Kiro OAuth connection required.',
+      };
+      status['kiro-oauth-reload-check'] = {
+        done: false,
+        detail: 'Click Refresh after making changes.',
+      };
+      return status;
+    }
+
     status[`${provider}-model-selected`] = {
       done: selectedMatches,
       detail: selectedMatches ? 'Provider model selected.' : 'A different model is currently active.',
@@ -7594,6 +7656,7 @@ Example response:
       'copilot',
       'google-oauth',
       'azure-oauth',
+      'kiro-oauth',
       'openai',
       'anthropic',
       'google',
@@ -7607,6 +7670,7 @@ Example response:
       'fireworks',
       'sambanova',
       'ollama',
+      'kiro',
     ];
     const providers = Array.from(new Set([...knownProviders, ...available.map(m => m.provider)]))
       .filter(p => p && String(p).toLowerCase() !== 'cursor');
@@ -8177,6 +8241,7 @@ Example response:
   app.get('/api/oauth/capabilities', (_req, res) => {
     const gid = (process.env.OAUTH_GOOGLE_CLIENT_ID || '').trim();
     const aid = (process.env.OAUTH_AZURE_CLIENT_ID || '').trim();
+    const kid = (process.env.OAUTH_KIRO_CLIENT_ID || '').trim();
     res.json({
       github: { ready: true, hint: 'Uses built-in device-flow client (VS Code Copilot public client).' },
       google: {
@@ -8192,6 +8257,13 @@ Example response:
         hint: aid
           ? ''
           : 'Register an app in Azure AD (device code flow), then set OAUTH_AZURE_CLIENT_ID in the server .env and restart.',
+      },
+      kiro: {
+        ready: !!kid,
+        envVar: 'OAUTH_KIRO_CLIENT_ID',
+        hint: kid
+          ? ''
+          : 'Register a Kiro OAuth app (device code flow) and set OAUTH_KIRO_CLIENT_ID in the server .env. Optionally override OAUTH_KIRO_DEVICE_URL / OAUTH_KIRO_TOKEN_URL / OAUTH_KIRO_SCOPES for self-hosted deployments. Or use the simpler API-key path: set KIRO_API_KEY in Settings → API Keys.',
       },
     });
   });
@@ -8234,7 +8306,7 @@ Example response:
 
   app.get('/api/oauth/status', (_req, res) => {
     const oauthManager = runtime.getOAuthManager();
-    const providers = ['github', 'google', 'azure'];
+    const providers = ['github', 'google', 'azure', 'kiro'];
     const status: Record<string, boolean> = {};
     for (const p of providers) {
       status[p] = oauthManager.hasToken(p);
