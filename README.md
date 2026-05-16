@@ -45,7 +45,12 @@
 
 ## Panel 1.0.9 Update
 
-WhiteOwl 1.0.9 ships with native **Kiro aggregator** support. Kiro can now be plugged in exactly the way Visual Studio / Copilot accepts a custom AI provider: drop a `KIRO_API_KEY` into `.env` (or paste it via Settings → API Keys) and the dashboard's model picker exposes Kiro-routed Claude, GPT, Gemini, Grok, DeepSeek, Qwen, and Llama variants through one OpenAI-compatible endpoint. Optional `KIRO_BASE_URL` lets you point the panel at a self-hosted or private Kiro deployment.
+WhiteOwl 1.0.9 ships with native **Kiro aggregator** support, available in both connection modes:
+
+- **API key**: drop a `KIRO_API_KEY` into `.env` (or paste it via Settings → API Keys, optionally with `KIRO_BASE_URL` for self-hosted deployments). Models surface immediately in the dashboard picker.
+- **OAuth device flow**: hit Settings → OAuth → Kiro and connect via the same device-code experience used for GitHub Copilot, Google, and Azure. Configure `OAUTH_KIRO_CLIENT_ID` (plus optional `OAUTH_KIRO_DEVICE_URL` / `OAUTH_KIRO_TOKEN_URL` / `OAUTH_KIRO_SCOPES`) on the server.
+
+Either path exposes Kiro-routed Claude, GPT, Gemini, Grok, DeepSeek, Qwen, and Llama variants through one OpenAI-compatible endpoint, plugging in exactly the way Visual Studio / Copilot wires custom AI providers.
 
 ## Panel 1.0.7 Patch
 

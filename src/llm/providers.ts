@@ -2979,6 +2979,15 @@ export function createLLMProvider(config: ModelConfig): LLMProvider {
       oauthProvider: 'azure',
     });
   }
+  if (config.provider === 'kiro-oauth') {
+    return new OAuthOpenAIProvider({
+      ...config,
+      oauthProvider: 'kiro',
+      baseUrl: config.baseUrl
+        || process.env.KIRO_BASE_URL
+        || OPENAI_COMPATIBLE_URLS.kiro!,
+    });
+  }
 
 
   if (OPENAI_COMPATIBLE_PROVIDERS.has(config.provider)) {

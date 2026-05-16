@@ -215,6 +215,7 @@ export class Runtime {
           if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
           if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
           if (savedMc.provider === 'kiro' && process.env.KIRO_BASE_URL) savedMc.baseUrl = process.env.KIRO_BASE_URL;
+          if (savedMc.provider === 'kiro-oauth') savedMc.baseUrl = process.env.KIRO_BASE_URL || 'https://api.kiro.dev/v1';
           for (const agentConfig of this.config.agents) {
             agentConfig.model = savedMc;
           }
@@ -959,6 +960,7 @@ async ensureAgents(): Promise<boolean> {
             if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
             if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
             if (savedMc.provider === 'kiro' && process.env.KIRO_BASE_URL) savedMc.baseUrl = process.env.KIRO_BASE_URL;
+            if (savedMc.provider === 'kiro-oauth') savedMc.baseUrl = process.env.KIRO_BASE_URL || 'https://api.kiro.dev/v1';
             for (const ac of freshConfig.agents) ac.model = savedMc;
             this.logger.info(`ensureAgents: applied saved model ${savedMc.provider}/${savedMc.model}`);
           }
@@ -1342,6 +1344,9 @@ restoreCustomAgents(): void {
     }
     if (mc.provider === 'kiro' && process.env.KIRO_BASE_URL) {
       mc.baseUrl = process.env.KIRO_BASE_URL;
+    }
+    if (mc.provider === 'kiro-oauth') {
+      mc.baseUrl = process.env.KIRO_BASE_URL || 'https://api.kiro.dev/v1';
     }
 
 
