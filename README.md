@@ -43,6 +43,15 @@
 | **Perp Desk** | Native Hyperliquid perp surface with funding, marks, live or paper positions, and encrypted API settings |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
 
+## Panel 1.0.11 Update
+
+WhiteOwl 1.0.11 reworks the Kiro OAuth path into **Sign in with Kiro IDE**. Instead of a placeholder OAuth 2.0 device flow, the panel detects the existing Kiro IDE / `kiro-cli` login on the local machine and reuses it. Two sources are supported out of the box, mirroring what Kiro itself writes to disk:
+
+- Kiro Desktop credentials (Sign in with GitHub / Google / AWS Builder ID via the Kiro IDE app) — refreshed against `https://prod.{region}.auth.desktop.kiro.dev/refreshToken`.
+- `kiro-cli` SQLite session, including AWS SSO OIDC (IAM Identity Center) — refreshed against `https://oidc.{region}.amazonaws.com/token`.
+
+In Settings → OAuth, the Kiro card now shows whether a local session is detected. Click Connect to reuse it; no extra browser dance, no `OAUTH_KIRO_CLIENT_ID` required. The simpler API-key path (`KIRO_API_KEY`) introduced in 1.0.9 still works in parallel.
+
 ## Panel 1.0.9 Update
 
 WhiteOwl 1.0.9 ships with native **Kiro aggregator** support, available in both connection modes:
