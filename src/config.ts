@@ -949,6 +949,26 @@ export function getAvailableModels(): Array<{ provider: string; model: string; l
       { provider: 'sambanova', model: 'Qwen2.5-72B-Instruct', label: 'Qwen 2.5 72B (SambaNova)', tier: 'smart', cost: 'API' },
     );
   }
+  // Kiro acts as an aggregator: a single key unlocks routing across the
+  // listed model families through one OpenAI-compatible endpoint, similar to
+  // the way Visual Studio / Copilot wires in alternative LLMs.
+  if (env('KIRO_API_KEY')) {
+    models.push(
+      { provider: 'kiro', model: 'claude-opus-4.7', label: 'Claude Opus 4.7 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'claude-haiku-4.5', label: 'Claude Haiku 4.5 (Kiro)', tier: 'fast', cost: 'API' },
+      { provider: 'kiro', model: 'gpt-5.4', label: 'GPT-5.4 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'gpt-5-mini', label: 'GPT-5 Mini (Kiro)', tier: 'fast', cost: 'API' },
+      { provider: 'kiro', model: 'gpt-4.1', label: 'GPT-4.1 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Kiro)', tier: 'fast', cost: 'API' },
+      { provider: 'kiro', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Kiro)', tier: 'fast', cost: 'API' },
+      { provider: 'kiro', model: 'grok-3', label: 'Grok 3 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'deepseek-v3.2', label: 'DeepSeek V3.2 (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'qwen3-coder-next', label: 'Qwen3-Coder-Next (Kiro)', tier: 'smart', cost: 'API' },
+      { provider: 'kiro', model: 'llama-3.3-70b', label: 'Llama 3.3 70B (Kiro)', tier: 'smart', cost: 'API' },
+    );
+  }
   if (env('OLLAMA_BASE_URL') || _ollamaDetected) {
 
     if (_ollamaInstalledModels.length > 0) {
