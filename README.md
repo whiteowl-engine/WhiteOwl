@@ -43,6 +43,10 @@
 | **Perp Desk** | Native Hyperliquid perp surface with funding, marks, live or paper positions, and encrypted API settings |
 | **Local Ops** | Browser automation, terminal access, project workspace, SQLite-backed memory, and background jobs |
 
+## Panel 1.0.9 Update
+
+WhiteOwl 1.0.9 ships with native **Kiro aggregator** support. Kiro can now be plugged in exactly the way Visual Studio / Copilot accepts a custom AI provider: drop a `KIRO_API_KEY` into `.env` (or paste it via Settings → API Keys) and the dashboard's model picker exposes Kiro-routed Claude, GPT, Gemini, Grok, DeepSeek, Qwen, and Llama variants through one OpenAI-compatible endpoint. Optional `KIRO_BASE_URL` lets you point the panel at a self-hosted or private Kiro deployment.
+
 ## Panel 1.0.7 Patch
 
 WhiteOwl 1.0.7 fixes the TypeScript release build for the ESM runtime: `.ts` source imports now compile cleanly, `import.meta` is supported during `npm run build`, and the package lock version is back in sync with the release version.
@@ -84,7 +88,7 @@ The current public build exposes the main dashboard, agent chat, portfolio, wall
 - **Web Dashboard** — Full-featured trading panel with real-time data, charts, and controls
 - **Multi-Agent System** — Configurable agents (Strategy Commander, Coder, Shit Trader) with independent skills and autonomy levels
 - **31 Plugin Skills, 224 Tools** — Modular architecture covering trading, analysis, market intel, portfolio, perps, announcements, and automation
-- **Multi-LLM Support** — OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Groq, DeepSeek, Ollama (local), OpenRouter, Mistral, Cerebras, Together, Fireworks, GitHub Copilot (free via OAuth), Azure OpenAI, AWS Bedrock, Vertex AI, and more
+- **Multi-LLM Support** — OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Groq, DeepSeek, Ollama (local), OpenRouter, Mistral, Cerebras, Together, Fireworks, GitHub Copilot (free via OAuth), Azure OpenAI, AWS Bedrock, Vertex AI, Kiro aggregator, and more
 - **Autonomous Trading** — Shit Trader surface with paper trading, execution profiles, risk engine, and market connections to Axiom and Pump.fun
 - **Live Events** — Real-time event streaming via WebSocket with full AI activity log
 - **Risk Management** — Hard limits on position size, daily loss, exposure. Emergency stop. AI cannot bypass

@@ -24,6 +24,10 @@ const OPENAI_COMPATIBLE_URLS: Partial<Record<LLMProviderName, string>> = {
   hyperbolic: 'https://api.hyperbolic.xyz/v1',
   cohere: 'https://api.cohere.com/compatibility/v1',
   lepton: 'https://api.lepton.ai/v1',
+  // Kiro acts as an OpenAI-compatible aggregator: same plug-and-play model as
+  // pointing the OpenAI client at a custom base URL (similar to how Visual
+  // Studio / Copilot wires in alternative providers). Override via KIRO_BASE_URL.
+  kiro: 'https://api.kiro.dev/v1',
 };
 
 const OPENAI_COMPATIBLE_PROVIDERS = new Set<LLMProviderName>(

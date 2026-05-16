@@ -214,6 +214,7 @@ export class Runtime {
           if (envKey && process.env[envKey]) savedMc.apiKey = process.env[envKey];
           if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
           if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+          if (savedMc.provider === 'kiro' && process.env.KIRO_BASE_URL) savedMc.baseUrl = process.env.KIRO_BASE_URL;
           for (const agentConfig of this.config.agents) {
             agentConfig.model = savedMc;
           }
@@ -450,15 +451,28 @@ export class Runtime {
         if (this.browserService) {
           sniperJob.setBrowserService(this.browserService);
 
-          try {
-            const cdpResult = await this.browserService.connectMainBrowser();
-            if (cdpResult.success) {
-              this.logger.info(`[Boot] Auto-connected Chrome CDP — Axiom ✓ GMGN ✓`);
-            } else {
-              this.logger.warn(`[Boot] Chrome CDP auto-connect failed: ${cdpResult.message}`);
-            }
-          } catch (e: any) {
-            this.logger.warn(`[Boot] Chrome CDP auto-connect error: ${e.message}`);
+          if (process.env.WHITEOWL_SKIP_CDP === '1') {
+            this.logger.warn('[Boot] WHITEOWL_SKIP_CDP=1 — skipping Chrome CDP auto-connect');
+          } else {
+            // Don't block boot on CDP connect: cap at 5s and continue
+            const cdpPromise = this.browserService.connectMainBrowser()
+              .then((cdpResult) => {
+                if (cdpResult.success) {
+                  this.logger.info(`[Boot] Auto-connected Chrome CDP — Axiom ✓ GMGN ✓`);
+                } else {
+                  this.logger.warn(`[Boot] Chrome CDP auto-connect failed: ${cdpResult.message}`);
+                }
+              })
+              .catch((e: any) => {
+                this.logger.warn(`[Boot] Chrome CDP auto-connect error: ${e?.message || e}`);
+              });
+
+            const timeout = new Promise<void>((resolve) => setTimeout(() => {
+              this.logger.warn('[Boot] Chrome CDP auto-connect timed out (5s) — continuing without it');
+              resolve();
+            }, 5000));
+
+            await Promise.race([cdpPromise, timeout]);
           }
         }
 
@@ -944,6 +958,7 @@ async ensureAgents(): Promise<boolean> {
             if (envKey && process.env[envKey]) savedMc.apiKey = process.env[envKey];
             if (savedMc.provider === 'ollama') savedMc.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
             if (savedMc.provider === 'google-oauth') savedMc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+            if (savedMc.provider === 'kiro' && process.env.KIRO_BASE_URL) savedMc.baseUrl = process.env.KIRO_BASE_URL;
             for (const ac of freshConfig.agents) ac.model = savedMc;
             this.logger.info(`ensureAgents: applied saved model ${savedMc.provider}/${savedMc.model}`);
           }
@@ -1325,6 +1340,9 @@ restoreCustomAgents(): void {
     if (mc.provider === 'google-oauth') {
       mc.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
     }
+    if (mc.provider === 'kiro' && process.env.KIRO_BASE_URL) {
+      mc.baseUrl = process.env.KIRO_BASE_URL;
+    }
 
 
     const privacyConfig = this.config.privacy || {};
@@ -1370,6 +1388,8 @@ restoreCustomAgents(): void {
     fireworks: 'FIREWORKS_API_KEY',
     sambanova: 'SAMBANOVA_API_KEY',
     ollama: 'OLLAMA_BASE_URL',
+    kiro: 'KIRO_API_KEY',
+    kiro_base_url: 'KIRO_BASE_URL',
     houdini_key: 'HOUDINI_API_KEY',
     houdini_secret: 'HOUDINI_API_SECRET',
     hyperliquid_api_url: 'HYPERLIQUID_API_URL',
@@ -1384,7 +1404,7 @@ restoreCustomAgents(): void {
       const val = process.env[envKey];
       if (val) {
 
-        result[provider] = provider === 'ollama' || provider === 'hyperliquid_api_url' || provider === 'hyperliquid_account_address' || provider === 'hyperliquid_api_wallet_address'
+        result[provider] = provider === 'ollama' || provider === 'kiro_base_url' || provider === 'hyperliquid_api_url' || provider === 'hyperliquid_account_address' || provider === 'hyperliquid_api_wallet_address'
           ? val
           : '***configured***';
       }
