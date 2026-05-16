@@ -2,6 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { LoggerInterface } from '../types.ts';
+import {
+  detectKiroSession,
+  loginViaKiroIDE,
+  refreshExistingKiroToken,
+  type KiroAuthFlavor,
+  type KiroSessionToken,
+  type DetectedSession,
+} from '../llm/kiro-session.ts';
 
 export interface OAuthProviderConfig {
   name: string;
@@ -19,6 +27,15 @@ export interface OAuthToken {
   expiresAt: number;
   scope: string;
   tokenType: string;
+  /** Optional metadata used by non-standard providers (e.g. Kiro). */
+  meta?: {
+    flavor?: KiroAuthFlavor;
+    source?: string;
+    region?: string;
+    profileArn?: string;
+    clientId?: string;
+    clientSecret?: string;
+  };
 }
 
 interface DeviceCodeResponse {
@@ -58,16 +75,17 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     tokenEndpointAuth: 'body',
   },
 
-  // Kiro AI aggregator. Uses an OAuth 2.0 device-flow endpoint so the panel
-  // can connect to Kiro without a long-lived API key — same pattern as
-  // GitHub/Google/Azure. Endpoints + clientId are env-configurable so
-  // self-hosted or alternative Kiro deployments slot in cleanly.
+  // Kiro is NOT a public OAuth 2.0 device-flow provider. Instead, the panel
+  // re-uses an existing Kiro IDE / kiro-cli login on the local machine.
+  // Defined here only so admin code that iterates OAUTH_PROVIDERS can still
+  // see "kiro"; deviceAuthUrl / tokenUrl are intentionally empty and the
+  // regular startDeviceFlow() guards against using them.
   kiro: {
-    name: 'Kiro',
-    clientId: process.env.OAUTH_KIRO_CLIENT_ID || '',
-    deviceAuthUrl: process.env.OAUTH_KIRO_DEVICE_URL || 'https://auth.kiro.dev/oauth/device/code',
-    tokenUrl: process.env.OAUTH_KIRO_TOKEN_URL || 'https://auth.kiro.dev/oauth/token',
-    scopes: (process.env.OAUTH_KIRO_SCOPES || 'kiro:models:invoke kiro:models:list').split(/\s+/).filter(Boolean),
+    name: 'Kiro IDE',
+    clientId: '__via_local_kiro_session__',
+    deviceAuthUrl: '',
+    tokenUrl: '',
+    scopes: [],
     tokenEndpointAuth: 'body',
   },
 };
@@ -95,6 +113,10 @@ async startDeviceFlow(providerName: string, clientIdOverride?: string): Promise<
     expiresIn: number;
     pollFn: () => Promise<boolean>;
   }> {
+    if (providerName === 'kiro') {
+      throw new Error('Kiro does not use a public device-code flow. Use signInWithKiroIDE() (or click "Sign in with Kiro IDE" in the panel) — it reuses your existing Kiro IDE / kiro-cli session.');
+    }
+
     const provider = OAUTH_PROVIDERS[providerName];
     if (!provider) {
       throw new Error(`Unknown OAuth provider: ${providerName}. Available: ${Object.keys(OAUTH_PROVIDERS).join(', ')}`);
@@ -220,8 +242,30 @@ async getToken(providerName: string): Promise<string | null> {
     const token = this.tokens.get(providerName);
     if (!token) return null;
 
-
     if (token.expiresAt - Date.now() < 5 * 60 * 1000) {
+      // Kiro tokens use a custom refresh path (Kiro Desktop or AWS SSO OIDC),
+      // not the standard OAuth 2.0 token endpoint.
+      if (providerName === 'kiro' && token.meta?.flavor && token.refreshToken) {
+        try {
+          const fresh = await refreshExistingKiroToken({
+            flavor: token.meta.flavor,
+            refreshToken: token.refreshToken,
+            region: token.meta.region,
+            clientId: token.meta.clientId,
+            clientSecret: token.meta.clientSecret,
+            source: token.meta.source,
+          });
+          const stored = this.toOAuthToken('kiro', fresh);
+          this.tokens.set('kiro', stored);
+          this.saveTokens();
+          this.scheduleRefresh('kiro');
+          return stored.accessToken;
+        } catch (err: any) {
+          this.logger?.warn(`Kiro token refresh failed: ${err.message}`);
+          return token.accessToken;
+        }
+      }
+
       const refreshed = await this.refreshToken(providerName);
       if (refreshed) return refreshed.accessToken;
     }
@@ -264,6 +308,28 @@ getAuthenticatedProviders(): string[] {
   private async refreshToken(providerName: string): Promise<OAuthToken | null> {
     const token = this.tokens.get(providerName);
     if (!token?.refreshToken) return null;
+
+    if (providerName === 'kiro' && token.meta?.flavor) {
+      try {
+        const fresh = await refreshExistingKiroToken({
+          flavor: token.meta.flavor,
+          refreshToken: token.refreshToken,
+          region: token.meta.region,
+          clientId: token.meta.clientId,
+          clientSecret: token.meta.clientSecret,
+          source: token.meta.source,
+        });
+        const stored = this.toOAuthToken('kiro', fresh);
+        this.tokens.set('kiro', stored);
+        this.saveTokens();
+        this.scheduleRefresh('kiro');
+        this.logger?.debug(`OAuth [Kiro IDE]: token refreshed via ${stored.meta?.flavor}`);
+        return stored;
+      } catch (err: any) {
+        this.logger?.warn(`Kiro token refresh failed: ${err.message}`);
+        return null;
+      }
+    }
 
     const provider = OAUTH_PROVIDERS[providerName];
     if (!provider) return null;
@@ -383,5 +449,83 @@ shutdown(): void {
       clearTimeout(timer);
     }
     this.refreshTimers.clear();
+  }
+
+  /** Convert a refreshed Kiro session into our standard OAuthToken record. */
+  private toOAuthToken(provider: string, fresh: KiroSessionToken): OAuthToken {
+    return {
+      provider,
+      accessToken: fresh.accessToken,
+      refreshToken: fresh.refreshToken,
+      expiresAt: fresh.expiresAt,
+      scope: fresh.scope,
+      tokenType: fresh.tokenType,
+      meta: {
+        flavor: fresh.flavor,
+        source: fresh.source,
+        region: fresh.region,
+        profileArn: fresh.profileArn,
+        clientId: fresh.clientId,
+        clientSecret: fresh.clientSecret,
+      },
+    };
+  }
+
+  /**
+   * Detect whether a Kiro IDE / kiro-cli session exists on the local machine
+   * (used by the panel UI to decide whether the "Sign in with Kiro IDE"
+   * button should be live).
+   */
+  async kiroSessionStatus(): Promise<{
+    available: boolean;
+    flavor?: KiroAuthFlavor;
+    source?: string;
+    region?: string;
+    connected: boolean;
+    expiresAt?: number;
+    hint: string;
+  }> {
+    let detected: DetectedSession | null = null;
+    try {
+      detected = await detectKiroSession();
+    } catch (err: any) {
+      this.logger?.debug(`Kiro session detection error: ${err.message}`);
+    }
+
+    const stored = this.tokens.get('kiro');
+    if (detected) {
+      return {
+        available: true,
+        flavor: detected.flavor,
+        source: detected.source,
+        region: detected.region,
+        connected: !!stored,
+        expiresAt: stored?.expiresAt,
+        hint: stored
+          ? 'Kiro IDE session detected and connected.'
+          : 'Kiro IDE session detected — click Connect to reuse it inside WhiteOwl.',
+      };
+    }
+
+    return {
+      available: false,
+      connected: !!stored,
+      expiresAt: stored?.expiresAt,
+      hint: 'No Kiro IDE / kiro-cli session found. Sign in via the Kiro IDE app (or run `kiro-cli login`) and then click Refresh. Or use the simpler API-key path: set KIRO_API_KEY in Settings → API Keys.',
+    };
+  }
+
+  /**
+   * Reuse an existing Kiro IDE / kiro-cli login on this machine and store
+   * a freshly-minted access token under the "kiro" provider entry.
+   */
+  async signInWithKiroIDE(): Promise<OAuthToken> {
+    const fresh = await loginViaKiroIDE();
+    const stored = this.toOAuthToken('kiro', fresh);
+    this.tokens.set('kiro', stored);
+    this.saveTokens();
+    this.scheduleRefresh('kiro');
+    this.logger?.info(`OAuth [Kiro IDE]: connected via ${fresh.flavor} (${fresh.source}, region=${fresh.region})`);
+    return stored;
   }
 }

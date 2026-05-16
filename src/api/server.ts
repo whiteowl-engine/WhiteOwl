@@ -7380,7 +7380,7 @@ Example response:
     'ollama', 'kiro',
   ]);
 
-  const buildProviderGuide = (provider: string): SetupGuide => {
+  const buildProviderGuide = async (provider: string): Promise<SetupGuide> => {
     if (provider === 'copilot') {
       return {
         provider,
@@ -7420,23 +7420,28 @@ Example response:
     }
 
     if (provider === 'kiro-oauth') {
-      const envKey = 'OAUTH_KIRO_CLIENT_ID';
-      const clientIdReady = !!(process.env[envKey] || '').trim();
-      const oauthDesc = clientIdReady
-        ? `Click the Connect button below — a Kiro authorization window will open. Confirm access. Status will update automatically after connecting.`
-        : `⚠ Kiro OAuth requires ${envKey} (and optionally OAUTH_KIRO_DEVICE_URL / OAUTH_KIRO_TOKEN_URL / OAUTH_KIRO_SCOPES) in .env. Alternatively, use the "kiro" provider (API Key mode) by setting KIRO_API_KEY in Settings → API Keys.`;
+      let kiroAvail = false;
+      let kiroHint = '';
+      try {
+        const s = await (runtime.getOAuthManager() as any).kiroSessionStatus?.();
+        kiroAvail = !!s?.available;
+        kiroHint = s?.hint || '';
+      } catch {}
+      const oauthDesc = kiroAvail
+        ? 'A logged-in Kiro IDE / kiro-cli session was detected on this machine. Click Connect — WhiteOwl will reuse that session (no second sign-in is required) and surface Kiro models in the picker.'
+        : (kiroHint || 'No Kiro IDE / kiro-cli session found. Sign in via the Kiro IDE app (or run `kiro-cli login`) and click Refresh. Or use the simpler API-key path: set KIRO_API_KEY in Settings → API Keys.');
       return {
         provider,
-        title: 'Kiro OAuth Setup',
-        summary: clientIdReady
-          ? 'Kiro works via OAuth — no API key needed once connected.'
-          : '⚠ Kiro OAuth Client ID not configured. Use KIRO_API_KEY (simpler) or set OAUTH_KIRO_CLIENT_ID in .env.',
+        title: 'Kiro IDE Sign-in',
+        summary: kiroAvail
+          ? 'Kiro IDE session detected. Connecting reuses that login — no extra browser flow.'
+          : (kiroHint || 'No local Kiro IDE session yet. Sign in via Kiro IDE / kiro-cli, then come back.'),
         steps: [
           {
             id: 'kiro-oauth-oauth',
-            title: 'Connect Kiro Account',
+            title: 'Sign in via Kiro IDE',
             description: oauthDesc,
-            blocking: clientIdReady,
+            blocking: kiroAvail,
             actions: [],
           },
           {
@@ -7456,9 +7461,9 @@ Example response:
         ],
         commonErrors: [
           {
-            pattern: '401|unauthorized|invalid_grant',
-            explanation: 'OAuth token expired or revoked.',
-            fix: 'Disconnect + Connect again in OAuth / Free AI.',
+            pattern: '401|unauthorized|invalid_grant|expired',
+            explanation: 'Kiro IDE session expired or refresh token was revoked.',
+            fix: 'Open Kiro IDE and sign in again (or run `kiro-cli login`), then click Reconnect here.',
           },
         ],
       };
@@ -7650,7 +7655,7 @@ Example response:
     return status;
   };
 
-  app.get('/api/setup-guides', (_req, res) => {
+  app.get('/api/setup-guides', async (_req, res) => {
     const available = getAvailableModels();
     const knownProviders = [
       'copilot',
@@ -7681,11 +7686,12 @@ Example response:
     if (requested) {
       return res.json({
         provider: requested,
-        guide: buildProviderGuide(requested),
+        guide: await buildProviderGuide(requested),
+        status: await buildSetupStepStatus(requested),
         providers,
       });
     }
-    const guides = providers.map(p => buildProviderGuide(p));
+    const guides = await Promise.all(providers.map(p => buildProviderGuide(p)));
     res.json({ providers, guides });
   });
 
@@ -8238,10 +8244,12 @@ Example response:
   });
 
 
-  app.get('/api/oauth/capabilities', (_req, res) => {
+  app.get('/api/oauth/capabilities', async (_req, res) => {
     const gid = (process.env.OAUTH_GOOGLE_CLIENT_ID || '').trim();
     const aid = (process.env.OAUTH_AZURE_CLIENT_ID || '').trim();
-    const kid = (process.env.OAUTH_KIRO_CLIENT_ID || '').trim();
+    let kiroStatus: any = null;
+    try { kiroStatus = await runtime.getOAuthManager().kiroSessionStatus(); }
+    catch { kiroStatus = { available: false, connected: false, hint: 'Kiro session detection failed.' }; }
     res.json({
       github: { ready: true, hint: 'Uses built-in device-flow client (VS Code Copilot public client).' },
       google: {
@@ -8259,11 +8267,14 @@ Example response:
           : 'Register an app in Azure AD (device code flow), then set OAUTH_AZURE_CLIENT_ID in the server .env and restart.',
       },
       kiro: {
-        ready: !!kid,
-        envVar: 'OAUTH_KIRO_CLIENT_ID',
-        hint: kid
-          ? ''
-          : 'Register a Kiro OAuth app (device code flow) and set OAUTH_KIRO_CLIENT_ID in the server .env. Optionally override OAUTH_KIRO_DEVICE_URL / OAUTH_KIRO_TOKEN_URL / OAUTH_KIRO_SCOPES for self-hosted deployments. Or use the simpler API-key path: set KIRO_API_KEY in Settings → API Keys.',
+        ready: !!kiroStatus?.available,
+        mode: 'kiro_ide_session',
+        flavor: kiroStatus?.flavor,
+        source: kiroStatus?.source,
+        region: kiroStatus?.region,
+        connected: !!kiroStatus?.connected,
+        expiresAt: kiroStatus?.expiresAt,
+        hint: kiroStatus?.hint,
       },
     });
   });
@@ -8272,6 +8283,32 @@ Example response:
     try {
       const providerName = req.params.provider;
       const oauthManager = runtime.getOAuthManager();
+
+      // Kiro is not a public OAuth 2.0 device-flow provider — it reuses the
+      // existing Kiro IDE / kiro-cli login on this machine.
+      if (providerName === 'kiro') {
+        try {
+          const token = await oauthManager.signInWithKiroIDE();
+          res.json({
+            mode: 'kiro_ide_session',
+            connected: true,
+            flavor: token.meta?.flavor,
+            source: token.meta?.source,
+            region: token.meta?.region,
+            expiresAt: token.expiresAt,
+            message: `Connected to Kiro via local ${token.meta?.flavor === 'aws_sso_oidc' ? 'kiro-cli (AWS SSO)' : 'Kiro IDE'} session.`,
+          });
+        } catch (err: any) {
+          res.status(400).json({
+            mode: 'kiro_ide_session',
+            connected: false,
+            error: err.message,
+            hint: 'Sign in via the Kiro IDE app (or run `kiro-cli login`) and retry. Alternatively, set KIRO_API_KEY in Settings → API Keys.',
+          });
+        }
+        return;
+      }
+
       const envKey = `OAUTH_${providerName.toUpperCase()}_CLIENT_ID`;
       const clientIdOverride = (process.env[envKey] || '').trim() || undefined;
       const flow = await oauthManager.startDeviceFlow(providerName, clientIdOverride);
@@ -8300,6 +8337,16 @@ Example response:
       })();
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/oauth/kiro/status', async (_req, res) => {
+    try {
+      const oauthManager = runtime.getOAuthManager();
+      const status = await oauthManager.kiroSessionStatus();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ available: false, connected: false, hint: err.message });
     }
   });
 
